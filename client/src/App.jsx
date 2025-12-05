@@ -100,11 +100,17 @@ export default function App() {
 
   useEffect(() => {
     console.log('Connecting to server:', SERVER_URL)
-    const s = io(SERVER_URL, {
-      path: '/api/socket.io',
-      transports: ['polling'],
-      upgrade: false
-    })
+    const socketConfig = {
+      transports: ['websocket', 'polling'],
+      upgrade: true
+    }
+    
+    // Solo usar path personalizado en producción
+    if (import.meta.env.PROD) {
+      socketConfig.path = '/api/socket.io'
+    }
+    
+    const s = io(SERVER_URL, socketConfig)
     socketRef.current = s
     setSocket(s)
 
