@@ -28,4 +28,6 @@ export default {
   dark: 'Oscuro',
   delete: 'Eliminar',
   micAccessDenied: 'No se pudo acceder al micrófono. Verifica los permisos.',
+  httpsRequired: 'Se requiere HTTPS para acceder al micrófono',
+  connectionError: 'Error de conexión al servidor',
 }

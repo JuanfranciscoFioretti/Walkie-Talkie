@@ -4,14 +4,20 @@ const cors = require('cors')
 const { Server } = require('socket.io')
 
 const app = express()
-app.use(cors())
+app.use(cors({
+  origin: true,
+  credentials: true
+}))
 
 const server = http.createServer(app)
 
 const io = new Server(server, {
   cors: {
-    origin: '*',
+    origin: true,
+    credentials: true
   },
+  transports: ['websocket', 'polling'],
+  allowEIO3: true
 })
 
 // Basic health route

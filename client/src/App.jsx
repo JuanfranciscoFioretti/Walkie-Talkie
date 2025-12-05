@@ -5,7 +5,7 @@ import es from './locales/es'
 import da from './locales/da'
 
 const SERVER_URL = import.meta.env.VITE_SERVER_URL || 
-  (import.meta.env.PROD ? window.location.origin : 'http://localhost:3001')
+  (import.meta.env.PROD ? `${window.location.protocol}//${window.location.host}/api` : 'http://localhost:3001')
 
 export default function App() {
   const [socket, setSocket] = useState(null)
@@ -99,11 +99,23 @@ export default function App() {
   const pendingCandidatesRef = useRef({})
 
   useEffect(() => {
-    const s = io(SERVER_URL)
+    console.log('Connecting to server:', SERVER_URL)
+    const s = io(SERVER_URL, {
+      transports: ['websocket', 'polling'],
+      timeout: 20000,
+      forceNew: true
+    })
     socketRef.current = s
     setSocket(s)
 
-    s.on('connect', () => console.log('connected', s.id))
+    s.on('connect', () => {
+      console.log('connected', s.id)
+      console.log('Connection successful to:', SERVER_URL)
+    })
+    s.on('connect_error', (error) => {
+      console.error('Connection failed:', error)
+      showNotice('Error de conexión al servidor')
+    })
     s.on('room-users', ({ users }) => handleRoomUsers(users))
     s.on('user-joined', (u) => handleUserJoined(u))
     s.on('user-left', ({ id }) => handleUserLeft(id))
@@ -182,18 +194,28 @@ export default function App() {
   async function ensureLocalStream() {
     if (!localStreamRef.current) {
       try {
+        // Verificar si estamos en HTTPS (requerido para micrófono en producción)
+        if (window.location.protocol !== 'https:' && window.location.hostname !== 'localhost') {
+          throw new Error('HTTPS requerido para acceso al micrófono')
+        }
+        
         const s = await navigator.mediaDevices.getUserMedia({ 
           audio: { 
             echoCancellation: true,
             noiseSuppression: true,
-            autoGainControl: true
+            autoGainControl: true,
+            sampleRate: 44100
           } 
         })
         localStreamRef.current = s
         console.log('Stream de audio obtenido correctamente')
       } catch (e) {
         console.warn('Acceso al micrófono denegado:', e)
-        showNotice(t('micAccessDenied') || 'No se pudo acceder al micrófono')
+        let errorMsg = t('micAccessDenied') || 'No se pudo acceder al micrófono'
+        if (e.message.includes('HTTPS')) {
+          errorMsg = 'Se requiere HTTPS para acceder al micrófono'
+        }
+        showNotice(errorMsg)
       }
     }
     return localStreamRef.current
@@ -245,7 +267,18 @@ export default function App() {
 
   async function createPeerConnection(peerId, isOfferer = false) {
     if (pcsRef.current[peerId]) return
-    const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] })
+    
+    // Configuración mejorada de ICE servers para producción
+    const iceServers = [
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun1.l.google.com:19302' },
+      { urls: 'stun:stun2.l.google.com:19302' }
+    ]
+    
+    const pc = new RTCPeerConnection({ 
+      iceServers,
+      iceCandidatePoolSize: 10
+    })
     const ref = { pc, senders: [], audioEl: createAudioElement(peerId) }
     pcsRef.current[peerId] = ref
 
