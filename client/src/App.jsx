@@ -100,31 +100,21 @@ export default function App() {
 
   useEffect(() => {
     console.log('Connecting to server:', SERVER_URL)
-    const socketConfig = {
-      transports: ['polling', 'websocket'], // Polling primero para Vercel
-      timeout: 20000,
-      forceNew: true,
-      upgrade: true,
-      rememberUpgrade: false
-    }
-    
-    // Configuración específica para producción en Vercel
-    if (import.meta.env.PROD) {
-      socketConfig.path = '/api/socketio'
-    }
-    
-    const s = io(SERVER_URL, socketConfig)
+    const s = io(SERVER_URL, {
+      path: '/api/socket.io',
+      transports: ['polling'],
+      forceNew: true
+    })
     socketRef.current = s
     setSocket(s)
 
     s.on('connect', () => {
       console.log('connected', s.id)
       console.log('Connection successful to:', SERVER_URL)
-      console.log('Transport:', s.io.engine.transport.name)
     })
     s.on('connect_error', (error) => {
       console.error('Connection failed:', error)
-      showNotice('Error de conexión al servidor')
+      showNotice('Connection error to server')
     })
     s.on('room-users', ({ users }) => handleRoomUsers(users))
     s.on('user-joined', (u) => handleUserJoined(u))

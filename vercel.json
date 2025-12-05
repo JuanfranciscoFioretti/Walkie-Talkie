@@ -7,21 +7,16 @@
       "config": {
         "distDir": "client/dist"
       }
-    }
-  ],
-  "functions": {
-    "api/socketio.js": {
-      "maxDuration": 30
-    }
-  },
-  "routes": [
-    {
-      "src": "/socket.io/(.*)",
-      "dest": "/api/socketio"
     },
     {
-      "src": "/api/socketio",
-      "dest": "/api/socketio"
+      "src": "api/socket.js",
+      "use": "@vercel/node"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/api/(.*)",
+      "dest": "/api/socket.js"
     },
     {
       "src": "/(.*)",

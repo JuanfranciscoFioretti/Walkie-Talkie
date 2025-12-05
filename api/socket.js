@@ -1,21 +1,20 @@
-import { Server } from 'socket.io'
+const { Server } = require('socket.io')
+const Client = require('socket.io-client')
 
-const SocketHandler = (req, res) => {
-  if (res.socket.server.io) {
-    console.log('Socket is already running')
-  } else {
-    console.log('Socket is initializing')
-    const io = new Server(res.socket.server, {
-      path: '/api/socketio',
+let io
+
+export default function handler(req, res) {
+  if (!res.socket.server.io) {
+    console.log('*First use, starting socket.io')
+
+    io = new Server(res.socket.server, {
+      path: '/api/socket.io',
       addTrailingSlash: false,
       cors: {
-        origin: "*",
-        methods: ["GET", "POST"]
-      },
-      transports: ['polling', 'websocket']
+        origin: '*',
+        methods: ['GET', 'POST']
+      }
     })
-    
-    res.socket.server.io = io
 
     io.on('connection', (socket) => {
       console.log('socket connected', socket.id)
@@ -67,8 +66,10 @@ const SocketHandler = (req, res) => {
         })
       })
     })
+
+    res.socket.server.io = io
+  } else {
+    console.log('socket.io already running')
   }
   res.end()
 }
-
-export default SocketHandler
