@@ -16,18 +16,29 @@ export default function App() {
   const [currentRoom, setCurrentRoom] = useState('general')
   const [volume, setVolume] = useState(() => Number(localStorage.getItem('wt_volume') || 0.75))
   const [audioEnabled, setAudioEnabled] = useState(false)
-  const [peerVolumes, setPeerVolumes] = useState(() => {
+  // per-peer prefs are stored per-room in localStorage under `wt_peer_prefs_all`:
+  // { [room]: { volumes: {...}, muted: {...} } }
+  const [peerVolumes, setPeerVolumes] = useState({})
+  const [peerMuted, setPeerMuted] = useState({})
+  const allPeerPrefsRef = useRef({})
+  useEffect(() => {
     try {
-      const p = JSON.parse(localStorage.getItem('wt_peer_prefs') || '{}')
-      return p.volumes || {}
-    } catch (e) { return {} }
-  })
-  const [peerMuted, setPeerMuted] = useState(() => {
-    try {
-      const p = JSON.parse(localStorage.getItem('wt_peer_prefs') || '{}')
-      return p.muted || {}
-    } catch (e) { return {} }
-  })
+      allPeerPrefsRef.current = JSON.parse(localStorage.getItem('wt_peer_prefs_all') || '{}')
+    } catch (e) {
+      allPeerPrefsRef.current = {}
+    }
+    // initialize for default room
+    const roomPrefs = allPeerPrefsRef.current[currentRoom] || {}
+    setPeerVolumes(roomPrefs.volumes || {})
+    setPeerMuted(roomPrefs.muted || {})
+  }, [])
+
+  // when room changes, load prefs for that room
+  useEffect(() => {
+    const roomPrefs = allPeerPrefsRef.current[currentRoom] || {}
+    setPeerVolumes(roomPrefs.volumes || {})
+    setPeerMuted(roomPrefs.muted || {})
+  }, [currentRoom])
 
   const socketRef = useRef(null)
   const pcsRef = useRef({}) // peerId -> { pc, senders: [], audioEl }
@@ -41,12 +52,14 @@ export default function App() {
   const peerMutedRef = useRef(peerMuted)
   useEffect(()=>{ peerVolumesRef.current = peerVolumes }, [peerVolumes])
   useEffect(()=>{ peerMutedRef.current = peerMuted }, [peerMuted])
+  
+  const [localSpeaking, setLocalSpeaking] = useState(false)
 
-  // persist peer prefs helper
+  // persist peer prefs per-room
   function persistPeerPrefs(vols, muts) {
     try {
-      const obj = { volumes: vols, muted: muts }
-      localStorage.setItem('wt_peer_prefs', JSON.stringify(obj))
+      allPeerPrefsRef.current[currentRoom] = { volumes: vols, muted: muts }
+      localStorage.setItem('wt_peer_prefs_all', JSON.stringify(allPeerPrefsRef.current))
     } catch (e) { console.warn('failed saving peer prefs', e) }
   }
   
@@ -324,6 +337,7 @@ export default function App() {
       }
     })
     socketRef.current.emit('start-speaking', { room: currentRoom })
+    setLocalSpeaking(true)
   }
 
   function handleStopSpeaking() {
@@ -335,6 +349,7 @@ export default function App() {
       ref.senders = []
     })
     socketRef.current.emit('stop-speaking', { room: currentRoom })
+    setLocalSpeaking(false)
   }
 
   // Friend management
@@ -443,7 +458,7 @@ export default function App() {
                     <div className="font-medium text-white">{f}</div>
                     <div className="flex items-center gap-2">
                       <button className="text-sm px-2 py-1 bg-emerald-500 rounded" onClick={()=>startDM(f)}>Chat</button>
-                      <button className="text-sm px-2 py-1 bg-red-500 rounded" onClick={()=>removeFriend(f)}>Eliminar</button>
+                      <button className="text-sm px-2 py-1 bg-red-500 rounded" onClick={()=>{ if (confirm(`Eliminar amigo ${f}?`)) removeFriend(f) }}>Eliminar</button>
                     </div>
                   </div>
                 ))}
@@ -457,7 +472,10 @@ export default function App() {
               onMouseUp={() => joined && handleStopSpeaking()}
               onTouchStart={() => (joined ? handleStartSpeaking() : joinRoom())}
               onTouchEnd={() => joined && handleStopSpeaking()}
-              className="flex h-16 w-full cursor-pointer items-center justify-center gap-2 overflow-hidden rounded-xl bg-primary px-5 text-white shadow-[0_0_20px_rgba(37,140,244,0.5)] transition-transform duration-200 ease-in-out active:scale-95"
+              className={
+                `flex h-16 w-full cursor-pointer items-center justify-center gap-2 overflow-hidden rounded-xl px-5 text-white shadow-[0_0_20px_rgba(37,140,244,0.5)] transition-transform duration-200 ease-in-out active:scale-95 ` +
+                (localSpeaking ? 'bg-emerald-500 ring-4 ring-primary/30 animate-pulse scale-105' : 'bg-primary')
+              }
             >
               <span className="material-symbols-outlined text-white text-2xl">mic</span>
               <span className="font-display truncate text-lg font-bold leading-normal tracking-[0.015em]">{joined ? 'Pulsar para Hablar' : 'Unirse'}</span>
