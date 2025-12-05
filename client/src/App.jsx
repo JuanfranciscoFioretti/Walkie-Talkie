@@ -15,6 +15,8 @@ export default function App() {
   const [currentRoom, setCurrentRoom] = useState('general')
   const [volume, setVolume] = useState(() => Number(localStorage.getItem('wt_volume') || 0.75))
   const [audioEnabled, setAudioEnabled] = useState(false)
+  const [peerVolumes, setPeerVolumes] = useState({})
+  const [peerMuted, setPeerMuted] = useState({})
 
   const socketRef = useRef(null)
   const pcsRef = useRef({}) // peerId -> { pc, senders: [], audioEl }
@@ -24,6 +26,10 @@ export default function App() {
   const draggingVolumeRef = useRef(false)
   const audioEnabledRef = useRef(audioEnabled)
   useEffect(()=>{ audioEnabledRef.current = audioEnabled }, [audioEnabled])
+  const peerVolumesRef = useRef(peerVolumes)
+  const peerMutedRef = useRef(peerMuted)
+  useEffect(()=>{ peerVolumesRef.current = peerVolumes }, [peerVolumes])
+  useEffect(()=>{ peerMutedRef.current = peerMuted }, [peerMuted])
   
   const pendingCandidatesRef = useRef({})
 
@@ -74,7 +80,16 @@ export default function App() {
     }
   }, [])
 
-  useEffect(()=>{ localStorage.setItem('wt_volume', String(volume)); Object.values(pcsRef.current).forEach(r => { if (r.audioEl) r.audioEl.volume = volume }) }, [volume])
+  useEffect(()=>{
+    localStorage.setItem('wt_volume', String(volume))
+    // apply global volume only where no per-peer override exists
+    Object.entries(pcsRef.current).forEach(([id, r]) => {
+      if (r.audioEl) {
+        const pvol = peerVolumesRef.current[id]
+        r.audioEl.volume = typeof pvol === 'number' ? pvol : volume
+      }
+    })
+  }, [volume])
 
   function handleRoomUsers(list) {
     setUsers(list)
@@ -110,9 +125,11 @@ export default function App() {
     audio.autoplay = true
     audio.controls = false
     audio.id = `audio-${peerId}`
-    audio.volume = volume
+    // apply per-peer volume if present, otherwise global
+    const pvol = peerVolumesRef.current[peerId]
+    audio.volume = typeof pvol === 'number' ? pvol : volume
     audio.playsInline = true
-    audio.muted = false
+    audio.muted = !!peerMutedRef.current[peerId]
     audioContainerRef.current?.appendChild(audio)
     // try to play in case browser requires a user gesture
     const tryPlay = async () => {
@@ -151,6 +168,10 @@ export default function App() {
       if (ref.audioEl) {
         ref.audioEl.srcObject = ev.streams[0]
         try { ref.audioEl.play().catch(()=>{}) } catch(e){}
+        // ensure volume/mute are applied when track arrives
+        const pvol = peerVolumesRef.current[peerId]
+        ref.audioEl.volume = typeof pvol === 'number' ? pvol : volume
+        ref.audioEl.muted = !!peerMutedRef.current[peerId]
       }
     }
 
@@ -191,6 +212,22 @@ export default function App() {
       }
       delete pendingCandidatesRef.current[from]
     }
+  }
+
+  // per-peer volume/mute helpers
+  function setPeerVolume(peerId, val) {
+    setPeerVolumes((prev) => ({ ...prev, [peerId]: val }))
+    const ref = pcsRef.current[peerId]
+    if (ref && ref.audioEl) ref.audioEl.volume = val
+  }
+
+  function togglePeerMute(peerId) {
+    setPeerMuted((prev) => {
+      const next = { ...prev, [peerId]: !prev[peerId] }
+      const ref = pcsRef.current[peerId]
+      if (ref && ref.audioEl) ref.audioEl.muted = !!next[peerId]
+      return next
+    })
   }
 
   // Volume pointer handlers (click or drag on the custom bar)
@@ -340,6 +377,25 @@ export default function App() {
             </div>
             <div className="w-full max-w-xs pt-4">
               <div className="mb-2 flex items-center justify-between">
+                <div className="text-sm font-medium text-white">Participantes</div>
+              </div>
+              <div className="mt-1 space-y-2">
+                {users.length === 0 && <div className="text-sm opacity-70">No hay participantes</div>}
+                {users.map((u) => (
+                  <div key={u.id} className="flex items-center justify-between bg-slate-800/30 p-2 rounded">
+                    <div className="flex items-center gap-3">
+                      <div className={`w-3 h-3 rounded-full ${u.id === socketRef.current?.id ? 'bg-emerald-400' : 'bg-slate-500'}`}></div>
+                      <div className="font-medium text-white">{u.username}</div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button onClick={()=>togglePeerMute(u.id)} className="px-2 py-1 rounded bg-white/5 text-white/80 text-sm">{peerMuted[u.id] ? 'Unmute' : 'Mute'}</button>
+                      <input type="range" min="0" max="1" step="0.01" value={peerVolumes[u.id] ?? volume} onChange={(e)=>setPeerVolume(u.id, Number(e.target.value))} className="w-24" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="mt-4 mb-2 flex items-center justify-between">
                 <div className="text-sm font-medium text-white">Amigos</div>
               </div>
               <div className="flex gap-2">
