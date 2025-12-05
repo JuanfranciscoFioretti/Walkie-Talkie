@@ -182,10 +182,18 @@ export default function App() {
   async function ensureLocalStream() {
     if (!localStreamRef.current) {
       try {
-        const s = await navigator.mediaDevices.getUserMedia({ audio: true })
+        const s = await navigator.mediaDevices.getUserMedia({ 
+          audio: { 
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true
+          } 
+        })
         localStreamRef.current = s
+        console.log('Stream de audio obtenido correctamente')
       } catch (e) {
-        console.warn('mic access denied', e)
+        console.warn('Acceso al micrófono denegado:', e)
+        showNotice(t('micAccessDenied') || 'No se pudo acceder al micrófono')
       }
     }
     return localStreamRef.current
@@ -212,6 +220,19 @@ export default function App() {
 
   function cleanupAllPeers() {
     Object.keys(pcsRef.current).forEach(removePeer)
+  }
+
+  function forceReconnectPeers() {
+    // Función de utilidad para reconectar peers si hay problemas
+    const currentUsers = [...users]
+    cleanupAllPeers()
+    setTimeout(() => {
+      currentUsers.forEach((u) => {
+        if (u.id !== socketRef.current?.id) {
+          createPeerConnection(u.id, true)
+        }
+      })
+    }, 100)
   }
 
   function removePeer(peerId) {
@@ -252,10 +273,15 @@ export default function App() {
       }
     }
 
-    if (localStreamRef.current) {
+    // Solo agregar tracks si estamos hablando activamente
+    if (localStreamRef.current && localSpeaking) {
       localStreamRef.current.getAudioTracks().forEach((t) => {
-        const sender = pc.addTrack(t, localStreamRef.current)
-        ref.senders.push(sender)
+        try {
+          const sender = pc.addTrack(t, localStreamRef.current)
+          ref.senders.push(sender)
+        } catch (e) {
+          console.warn('Error agregando track inicial:', e)
+        }
       })
     }
 
@@ -274,7 +300,16 @@ export default function App() {
     const ref = pcsRef.current[from]
     await ref.pc.setRemoteDescription(new RTCSessionDescription(sdp))
     const stream = await ensureLocalStream()
-    if (stream) stream.getAudioTracks().forEach(t => { try { ref.senders.push(ref.pc.addTrack(t, stream)) } catch(e){} })
+    if (stream && localSpeaking && ref.senders.length === 0) {
+      stream.getAudioTracks().forEach(t => {
+        try {
+          const sender = ref.pc.addTrack(t, stream)
+          ref.senders.push(sender)
+        } catch(e) {
+          console.warn('Error agregando track en remote offer:', e)
+        }
+      })
+    }
     const answer = await ref.pc.createAnswer()
     await ref.pc.setLocalDescription(answer)
     socketRef.current.emit('webrtc-answer', { target: from, sdp: ref.pc.localDescription })
@@ -344,7 +379,12 @@ export default function App() {
       const next = !prev
       try {
         if (localStreamRef.current) {
-          localStreamRef.current.getAudioTracks().forEach(t => { t.enabled = !next })
+          localStreamRef.current.getAudioTracks().forEach(t => {
+            // Solo cambiar el estado si no estamos hablando activamente
+            if (!localSpeaking) {
+              t.enabled = !next
+            }
+          })
         }
       } catch (e) { console.warn('toggleLocalMute failed', e) }
       return next
@@ -378,26 +418,46 @@ export default function App() {
   }
 
   async function handleStartSpeaking() {
+    if (localSpeaking) return // Evitar múltiples activaciones
+    
     await ensureLocalStream()
+    if (!localStreamRef.current) {
+      console.warn('No se pudo obtener el stream de audio')
+      return
+    }
+    
+    // Habilitar el audio y unmutear si está necesario
+    if (localMutedRef.current) {
+      localStreamRef.current.getAudioTracks().forEach(t => { t.enabled = true })
+    }
+    
     Object.values(pcsRef.current).forEach(ref => {
-      if (localStreamRef.current) {
+      if (localStreamRef.current && ref.senders.length === 0) { // Solo agregar si no hay senders
         localStreamRef.current.getAudioTracks().forEach(t => {
-          const sender = ref.pc.addTrack(t, localStreamRef.current)
-          ref.senders.push(sender)
+          try {
+            const sender = ref.pc.addTrack(t, localStreamRef.current)
+            ref.senders.push(sender)
+          } catch (e) {
+            console.warn('Error agregando track:', e)
+          }
         })
       }
     })
+    
     socketRef.current.emit('start-speaking', { room: currentRoom })
     setLocalSpeaking(true)
   }
 
   function handleStopSpeaking() {
-    Object.values(pcsRef.current).forEach(ref => {
-      ref.senders.forEach(s => {
-        try { ref.pc.removeTrack(s) } catch (e) {}
+    if (!localSpeaking) return // Evitar múltiples desactivaciones
+    
+    // En lugar de remover los tracks, los deshabilitamos
+    if (localStreamRef.current) {
+      localStreamRef.current.getAudioTracks().forEach(t => {
+        t.enabled = false // Deshabilitar en lugar de remover
       })
-      ref.senders = []
-    })
+    }
+    
     socketRef.current.emit('stop-speaking', { room: currentRoom })
     setLocalSpeaking(false)
   }

@@ -27,4 +27,5 @@ export default {
   light: 'Claro',
   dark: 'Oscuro',
   delete: 'Eliminar',
+  micAccessDenied: 'No se pudo acceder al micrófono. Verifica los permisos.',
 }
