@@ -1,13 +1,8 @@
-const { Server } = require('socket.io')
-const Client = require('socket.io-client')
-
-let io
+import { Server } from 'socket.io'
 
 export default function handler(req, res) {
   if (!res.socket.server.io) {
-    console.log('*First use, starting socket.io')
-
-    io = new Server(res.socket.server, {
+    const io = new Server(res.socket.server, {
       path: '/api/socket.io',
       addTrailingSlash: false,
       cors: {
