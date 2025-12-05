@@ -81,6 +81,10 @@ if (process.env.NODE_ENV !== 'production') {
   server.listen(PORT, () => {
     console.log(`Walkie-Talkie server listening on ${PORT}`)
   })
+} else {
+  // Para Vercel, necesitamos exportar el servidor HTTP
+  module.exports = server
 }
 
-module.exports = app
+// También exportamos la app de Express para compatibilidad
+module.exports.default = server
