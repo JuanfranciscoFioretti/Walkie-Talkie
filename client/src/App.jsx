@@ -5,7 +5,7 @@ import es from './locales/es'
 import da from './locales/da'
 
 const SERVER_URL = import.meta.env.VITE_SERVER_URL || 
-  (import.meta.env.PROD ? window.location.origin : 'http://localhost:3002')
+  (import.meta.env.PROD ? window.location.origin : 'http://localhost:3001')
 
 export default function App() {
   const [socket, setSocket] = useState(null)
@@ -102,12 +102,9 @@ export default function App() {
     console.log('Connecting to server:', SERVER_URL)
     const socketConfig = {
       transports: ['websocket', 'polling'],
-      upgrade: true
-    }
-    
-    // Solo usar path personalizado en producción
-    if (import.meta.env.PROD) {
-      socketConfig.path = '/api/socket.io'
+      upgrade: true,
+      timeout: 20000,
+      forceNew: true
     }
     
     const s = io(SERVER_URL, socketConfig)
@@ -121,6 +118,12 @@ export default function App() {
     s.on('connect_error', (error) => {
       console.error('Connection failed:', error)
       showNotice('Connection error to server')
+    })
+    s.on('disconnect', (reason) => {
+      console.log('Disconnected:', reason)
+      if (reason === 'io server disconnect') {
+        s.connect()
+      }
     })
     s.on('room-users', ({ users }) => handleRoomUsers(users))
     s.on('user-joined', (u) => handleUserJoined(u))
@@ -200,11 +203,6 @@ export default function App() {
   async function ensureLocalStream() {
     if (!localStreamRef.current) {
       try {
-        // Verificar si estamos en HTTPS (requerido para micrófono en producción)
-        if (window.location.protocol !== 'https:' && window.location.hostname !== 'localhost') {
-          throw new Error('HTTPS requerido para acceso al micrófono')
-        }
-        
         const s = await navigator.mediaDevices.getUserMedia({ 
           audio: { 
             echoCancellation: true,
@@ -215,6 +213,31 @@ export default function App() {
         })
         localStreamRef.current = s
         console.log('Stream de audio obtenido correctamente')
+        
+        const audioContext = new AudioContext()
+        const analyser = audioContext.createAnalyser()
+        const microphone = audioContext.createMediaStreamSource(s)
+        microphone.connect(analyser)
+        analyser.fftSize = 256
+        const bufferLength = analyser.frequencyBinCount
+        const dataArray = new Uint8Array(bufferLength)
+        
+        const checkAudioLevel = () => {
+          analyser.getByteFrequencyData(dataArray)
+          const average = dataArray.reduce((a, b) => a + b) / bufferLength
+          const isSpeaking = average > 10
+          if (isSpeaking !== localSpeaking) {
+            setLocalSpeaking(isSpeaking)
+          }
+          if (audioEnabledRef.current) {
+            requestAnimationFrame(checkAudioLevel)
+          }
+        }
+        
+        if (audioEnabledRef.current) {
+          checkAudioLevel()
+        }
+        
       } catch (e) {
         console.warn('Acceso al micrófono denegado:', e)
         let errorMsg = t('micAccessDenied') || 'No se pudo acceder al micrófono'
@@ -251,7 +274,6 @@ export default function App() {
   }
 
   function forceReconnectPeers() {
-    // Función de utilidad para reconectar peers si hay problemas
     const currentUsers = [...users]
     cleanupAllPeers()
     setTimeout(() => {
@@ -274,7 +296,6 @@ export default function App() {
   async function createPeerConnection(peerId, isOfferer = false) {
     if (pcsRef.current[peerId]) return
     
-    // Configuración mejorada de ICE servers para producción
     const iceServers = [
       { urls: 'stun:stun.l.google.com:19302' },
       { urls: 'stun:stun1.l.google.com:19302' },
@@ -312,7 +333,6 @@ export default function App() {
       }
     }
 
-    // Solo agregar tracks si estamos hablando activamente
     if (localStreamRef.current && localSpeaking) {
       localStreamRef.current.getAudioTracks().forEach((t) => {
         try {
@@ -419,7 +439,6 @@ export default function App() {
       try {
         if (localStreamRef.current) {
           localStreamRef.current.getAudioTracks().forEach(t => {
-            // Solo cambiar el estado si no estamos hablando activamente
             if (!localSpeaking) {
               t.enabled = !next
             }
@@ -457,48 +476,55 @@ export default function App() {
   }
 
   async function handleStartSpeaking() {
-    if (localSpeaking) return // Evitar múltiples activaciones
+    if (localSpeaking) return 
     
+    console.log('Iniciando transmisión de audio...')
     await ensureLocalStream()
     if (!localStreamRef.current) {
       console.warn('No se pudo obtener el stream de audio')
+      showNotice('Error: No se puede acceder al micrófono')
       return
     }
     
-    // Habilitar el audio y unmutear si está necesario
-    if (localMutedRef.current) {
-      localStreamRef.current.getAudioTracks().forEach(t => { t.enabled = true })
-    }
+    localStreamRef.current.getAudioTracks().forEach(t => { 
+      t.enabled = true 
+      console.log('Track habilitado:', t.label)
+    })
     
-    Object.values(pcsRef.current).forEach(ref => {
-      if (localStreamRef.current && ref.senders.length === 0) { // Solo agregar si no hay senders
+    Object.entries(pcsRef.current).forEach(([peerId, ref]) => {
+      if (localStreamRef.current && ref.senders.length === 0) {
         localStreamRef.current.getAudioTracks().forEach(t => {
           try {
             const sender = ref.pc.addTrack(t, localStreamRef.current)
             ref.senders.push(sender)
+            console.log('Track agregado a peer:', peerId)
           } catch (e) {
-            console.warn('Error agregando track:', e)
+            console.warn('Error agregando track a peer', peerId, ':', e)
           }
         })
       }
     })
     
-    socketRef.current.emit('start-speaking', { room: currentRoom })
+    socketRef.current?.emit('start-speaking', { room: currentRoom })
     setLocalSpeaking(true)
+    console.log('Transmisión de audio iniciada')
   }
 
   function handleStopSpeaking() {
-    if (!localSpeaking) return // Evitar múltiples desactivaciones
+    if (!localSpeaking) return
     
-    // En lugar de remover los tracks, los deshabilitamos
+    console.log('Deteniendo transmisión de audio...')
+    
     if (localStreamRef.current) {
       localStreamRef.current.getAudioTracks().forEach(t => {
-        t.enabled = false // Deshabilitar en lugar de remover
+        t.enabled = false
+        console.log('Track deshabilitado:', t.label)
       })
     }
     
-    socketRef.current.emit('stop-speaking', { room: currentRoom })
+    socketRef.current?.emit('stop-speaking', { room: currentRoom })
     setLocalSpeaking(false)
+    console.log('Transmisión de audio detenida')
   }
 
   function saveFriends(next) { setFriends(next); localStorage.setItem('wt_friends', JSON.stringify(next)) }

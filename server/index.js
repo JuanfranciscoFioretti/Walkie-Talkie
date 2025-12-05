@@ -77,14 +77,12 @@ io.on('connection', (socket) => {
 
 const PORT = process.env.PORT || 3001
 
-if (process.env.NODE_ENV !== 'production') {
-  server.listen(PORT, () => {
-    console.log(`Walkie-Talkie server listening on ${PORT}`)
-  })
-} else {
-  // Para Vercel, necesitamos exportar el servidor HTTP
-  module.exports = server
-}
+server.listen(PORT, () => {
+  console.log(`Walkie-Talkie server listening on ${PORT}`)
+})
 
-// También exportamos la app de Express para compatibilidad
-module.exports.default = server
+// Para compatibilidad con Vercel si es necesario
+if (process.env.NODE_ENV === 'production') {
+  module.exports = server
+  module.exports.default = server
+}
