@@ -14,6 +14,7 @@ export default function App() {
   const [friendInput, setFriendInput] = useState('')
   const [currentRoom, setCurrentRoom] = useState('general')
   const [volume, setVolume] = useState(() => Number(localStorage.getItem('wt_volume') || 0.75))
+  const [audioEnabled, setAudioEnabled] = useState(false)
 
   const socketRef = useRef(null)
   const pcsRef = useRef({}) // peerId -> { pc, senders: [], audioEl }
@@ -21,6 +22,9 @@ export default function App() {
   const audioContainerRef = useRef(null)
   const volumeBarRef = useRef(null)
   const draggingVolumeRef = useRef(false)
+  const audioEnabledRef = useRef(audioEnabled)
+  useEffect(()=>{ audioEnabledRef.current = audioEnabled }, [audioEnabled])
+  
   const pendingCandidatesRef = useRef({})
 
   useEffect(() => {
@@ -112,7 +116,10 @@ export default function App() {
     audioContainerRef.current?.appendChild(audio)
     // try to play in case browser requires a user gesture
     const tryPlay = async () => {
-      try { await audio.play() } catch (e) { /* may be blocked until user gesture */ }
+      try {
+        // only attempt play if user already enabled audio or else it will be blocked
+        if (audioEnabledRef.current) await audio.play()
+      } catch (e) { /* may be blocked until user gesture */ }
     }
     tryPlay()
     return audio
@@ -376,6 +383,18 @@ export default function App() {
               <button onClick={leaveRoom} className="flex h-12 w-12 items-center justify-center rounded-full bg-white/10 text-white/70 transition-colors hover:bg-white/20">
                 <span className="material-symbols-outlined">logout</span>
               </button>
+              {!audioEnabled ? (
+                <button onClick={async ()=>{
+                  // user gesture: attempt to play any existing audio elements
+                  setAudioEnabled(true)
+                  const nodes = audioContainerRef.current?.querySelectorAll('audio') || []
+                  for (const a of nodes) {
+                    try { a.muted = false; await a.play() } catch(e){}
+                  }
+                }} className="flex h-12 items-center px-3 rounded bg-emerald-500 text-slate-900 font-medium">Enable Audio</button>
+              ) : (
+                <button className="flex h-12 items-center px-3 rounded bg-white/10 text-white/70">Audio On</button>
+              )}
             </div>
           </div>
         </div>
