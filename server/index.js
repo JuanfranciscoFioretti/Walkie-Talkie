@@ -70,6 +70,11 @@ io.on('connection', (socket) => {
 })
 
 const PORT = process.env.PORT || 3001
-server.listen(PORT, () => {
-  console.log(`Walkie-Talkie server listening on ${PORT}`)
-})
+
+if (process.env.NODE_ENV !== 'production') {
+  server.listen(PORT, () => {
+    console.log(`Walkie-Talkie server listening on ${PORT}`)
+  })
+}
+
+module.exports = app
