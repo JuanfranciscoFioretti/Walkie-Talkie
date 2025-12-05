@@ -7,6 +7,7 @@ export default function App() {
   const [socket, setSocket] = useState(null)
   const [joined, setJoined] = useState(false)
   const [users, setUsers] = useState([])
+  const [speakingPeers, setSpeakingPeers] = useState(() => new Set())
   const [username, setUsername] = useState(() => localStorage.getItem('wt_username') || 'Guest')
   const [friends, setFriends] = useState(() => {
     try { return JSON.parse(localStorage.getItem('wt_friends') || '[]') } catch (e) { return [] }
@@ -15,8 +16,18 @@ export default function App() {
   const [currentRoom, setCurrentRoom] = useState('general')
   const [volume, setVolume] = useState(() => Number(localStorage.getItem('wt_volume') || 0.75))
   const [audioEnabled, setAudioEnabled] = useState(false)
-  const [peerVolumes, setPeerVolumes] = useState({})
-  const [peerMuted, setPeerMuted] = useState({})
+  const [peerVolumes, setPeerVolumes] = useState(() => {
+    try {
+      const p = JSON.parse(localStorage.getItem('wt_peer_prefs') || '{}')
+      return p.volumes || {}
+    } catch (e) { return {} }
+  })
+  const [peerMuted, setPeerMuted] = useState(() => {
+    try {
+      const p = JSON.parse(localStorage.getItem('wt_peer_prefs') || '{}')
+      return p.muted || {}
+    } catch (e) { return {} }
+  })
 
   const socketRef = useRef(null)
   const pcsRef = useRef({}) // peerId -> { pc, senders: [], audioEl }
@@ -30,6 +41,14 @@ export default function App() {
   const peerMutedRef = useRef(peerMuted)
   useEffect(()=>{ peerVolumesRef.current = peerVolumes }, [peerVolumes])
   useEffect(()=>{ peerMutedRef.current = peerMuted }, [peerMuted])
+
+  // persist peer prefs helper
+  function persistPeerPrefs(vols, muts) {
+    try {
+      const obj = { volumes: vols, muted: muts }
+      localStorage.setItem('wt_peer_prefs', JSON.stringify(obj))
+    } catch (e) { console.warn('failed saving peer prefs', e) }
+  }
   
   const pendingCandidatesRef = useRef({})
 
@@ -68,6 +87,16 @@ export default function App() {
       if (ref && ref.pc && candidate) {
         try { await ref.pc.addIceCandidate(new RTCIceCandidate(candidate)) } catch (e) { console.warn(e) }
       }
+    })
+    s.on('user-started-speaking', ({ id }) => {
+      setSpeakingPeers((prev) => new Set(prev).add(id))
+    })
+    s.on('user-stopped-speaking', ({ id }) => {
+      setSpeakingPeers((prev) => {
+        const next = new Set(prev)
+        next.delete(id)
+        return next
+      })
     })
 
     return () => {
@@ -216,7 +245,11 @@ export default function App() {
 
   // per-peer volume/mute helpers
   function setPeerVolume(peerId, val) {
-    setPeerVolumes((prev) => ({ ...prev, [peerId]: val }))
+    setPeerVolumes((prev) => {
+      const next = { ...prev, [peerId]: val }
+      persistPeerPrefs(next, peerMutedRef.current)
+      return next
+    })
     const ref = pcsRef.current[peerId]
     if (ref && ref.audioEl) ref.audioEl.volume = val
   }
@@ -224,6 +257,7 @@ export default function App() {
   function togglePeerMute(peerId) {
     setPeerMuted((prev) => {
       const next = { ...prev, [peerId]: !prev[peerId] }
+      persistPeerPrefs(peerVolumesRef.current, next)
       const ref = pcsRef.current[peerId]
       if (ref && ref.audioEl) ref.audioEl.muted = !!next[peerId]
       return next
@@ -384,7 +418,7 @@ export default function App() {
                 {users.map((u) => (
                   <div key={u.id} className="flex items-center justify-between bg-slate-800/30 p-2 rounded">
                     <div className="flex items-center gap-3">
-                      <div className={`w-3 h-3 rounded-full ${u.id === socketRef.current?.id ? 'bg-emerald-400' : 'bg-slate-500'}`}></div>
+                      <div className={`w-3 h-3 rounded-full ${speakingPeers.has(u.id) ? 'bg-emerald-400 animate-pulse' : (u.id === socketRef.current?.id ? 'bg-emerald-300' : 'bg-slate-500')}`}></div>
                       <div className="font-medium text-white">{u.username}</div>
                     </div>
                     <div className="flex items-center gap-2">
