@@ -7,6 +7,16 @@ export default function App() {
   const [socket, setSocket] = useState(null)
   const [joined, setJoined] = useState(false)
   const [users, setUsers] = useState([])
+  const [username, setUsername] = useState(() => localStorage.getItem('wt_username') || 'Guest')
+  const [friends, setFriends] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem('wt_friends') || '[]')
+    } catch (e) {
+      return []
+    }
+  })
+  const [friendInput, setFriendInput] = useState('')
+  const [currentRoom, setCurrentRoom] = useState('general')
   const socketRef = useRef(null)
 
   useEffect(() => {
@@ -26,26 +36,57 @@ export default function App() {
     return () => s.disconnect()
   }, [])
 
-  function joinRoom() {
+  function joinRoom(room = 'general') {
     if (!socketRef.current) return
-    socketRef.current.emit('join-room', { room: 'general', username: 'Guest' })
+    socketRef.current.emit('join-room', { room, username })
+    setCurrentRoom(room)
     setJoined(true)
   }
   function leaveRoom() {
     if (!socketRef.current) return
-    socketRef.current.emit('leave-room', { room: 'general' })
+    socketRef.current.emit('leave-room', { room: currentRoom })
     setJoined(false)
     setUsers([])
+    setCurrentRoom('general')
   }
 
   function handleStartSpeaking() {
     if (!socketRef.current) return
-    socketRef.current.emit('start-speaking', { room: 'general' })
+    socketRef.current.emit('start-speaking', { room: currentRoom })
   }
   function handleStopSpeaking() {
     if (!socketRef.current) return
-    socketRef.current.emit('stop-speaking', { room: 'general' })
+    socketRef.current.emit('stop-speaking', { room: currentRoom })
   }
+
+  // Friend management
+  function saveFriends(next) {
+    setFriends(next)
+    localStorage.setItem('wt_friends', JSON.stringify(next))
+  }
+  function addFriend(name) {
+    const trimmed = (name || '').trim()
+    if (!trimmed) return
+    if (friends.includes(trimmed)) return
+    const next = [...friends, trimmed]
+    saveFriends(next)
+    setFriendInput('')
+  }
+  function removeFriend(name) {
+    const next = friends.filter((f) => f !== name)
+    saveFriends(next)
+  }
+  function startDM(friend) {
+    // deterministic room name for DM between two users
+    const pair = [username || 'Guest', friend].map((s) => s.replace(/\s+/g, '_'))
+    const room = `dm-${pair.sort().join('-')}`
+    joinRoom(room)
+  }
+
+  // persist username
+  useEffect(() => {
+    localStorage.setItem('wt_username', username)
+  }, [username])
 
   return (
     <div className="relative flex min-h-screen w-full flex-col items-center justify-center overflow-hidden p-4">
@@ -78,8 +119,16 @@ export default function App() {
           </div>
 
           <div className="text-center">
-            <h1 className="font-display text-3xl font-bold leading-tight tracking-tight text-white">Canal General</h1>
+            <h1 className="font-display text-3xl font-bold leading-tight tracking-tight text-white">{currentRoom.startsWith('dm-') ? 'Conversación privada' : 'Canal General'}</h1>
             <p className="font-display text-sm font-normal leading-normal text-green-400">{joined ? 'Conectado' : 'Desconectado'}</p>
+            <div className="mt-2 flex items-center justify-center gap-2">
+              <input
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                className="rounded px-2 py-1 text-sm bg-white/5 text-white placeholder-white/50"
+                placeholder="Tu nombre"
+              />
+            </div>
           </div>
 
           <div className="flex flex-col items-center gap-4 py-8">
@@ -97,6 +146,27 @@ export default function App() {
                     </div>
                   </div>
                 </div>
+              </div>
+            </div>
+            <div className="w-full max-w-xs pt-4">
+              <div className="mb-2 flex items-center justify-between">
+                <div className="text-sm font-medium text-white">Amigos</div>
+              </div>
+              <div className="flex gap-2">
+                <input className="flex-1 rounded px-3 py-2 bg-slate-800 text-white" value={friendInput} onChange={(e)=>setFriendInput(e.target.value)} placeholder="Añadir amigo" />
+                <button className="bg-primary px-3 rounded text-sm" onClick={()=>addFriend(friendInput)}>Añadir</button>
+              </div>
+              <div className="mt-3 space-y-2">
+                {friends.length === 0 && <div className="text-sm opacity-70">No tienes amigos añadidos</div>}
+                {friends.map((f) => (
+                  <div key={f} className="flex items-center justify-between bg-slate-800/30 p-2 rounded">
+                    <div className="font-medium text-white">{f}</div>
+                    <div className="flex items-center gap-2">
+                      <button className="text-sm px-2 py-1 bg-emerald-500 rounded" onClick={()=>startDM(f)}>Chat</button>
+                      <button className="text-sm px-2 py-1 bg-red-500 rounded" onClick={()=>removeFriend(f)}>Eliminar</button>
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
           </div>
