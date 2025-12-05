@@ -51,13 +51,14 @@ io.on('connection', (socket) => {
 
   // Simple passthrough for WebRTC signaling (SDP / ICE) when we implement audio
   socket.on('webrtc-offer', (data) => {
-    socket.to(data.target).emit('webrtc-offer', { ...data, from: socket.id })
+    // send directly to target socket id
+    io.to(data.target).emit('webrtc-offer', { sdp: data.sdp, from: socket.id })
   })
   socket.on('webrtc-answer', (data) => {
-    socket.to(data.target).emit('webrtc-answer', { ...data, from: socket.id })
+    io.to(data.target).emit('webrtc-answer', { sdp: data.sdp, from: socket.id })
   })
   socket.on('webrtc-ice-candidate', (data) => {
-    socket.to(data.target).emit('webrtc-ice-candidate', { ...data, from: socket.id })
+    io.to(data.target).emit('webrtc-ice-candidate', { candidate: data.candidate, from: socket.id })
   })
 
   socket.on('disconnecting', () => {

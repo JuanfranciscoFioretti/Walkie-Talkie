@@ -21,6 +21,7 @@ export default function App() {
   const audioContainerRef = useRef(null)
   const volumeBarRef = useRef(null)
   const draggingVolumeRef = useRef(false)
+  const pendingCandidatesRef = useRef({})
 
   useEffect(() => {
     const s = io(SERVER_URL)
@@ -34,17 +35,25 @@ export default function App() {
 
     s.on('webrtc-offer', async (data) => {
       const { from, sdp } = data
+      console.log('received offer from', from)
       await handleRemoteOffer(from, sdp)
     })
     s.on('webrtc-answer', async (data) => {
       const { from, sdp } = data
+      console.log('received answer from', from)
       const ref = pcsRef.current[from]
       if (ref && ref.pc) {
-        await ref.pc.setRemoteDescription(new RTCSessionDescription(sdp))
+        try { await ref.pc.setRemoteDescription(new RTCSessionDescription(sdp)) } catch(e){ console.warn(e) }
       }
     })
     s.on('webrtc-ice-candidate', async (data) => {
       const { from, candidate } = data
+      // If we don't have a pc yet, buffer the candidate
+      if (!pcsRef.current[from]) {
+        pendingCandidatesRef.current[from] = pendingCandidatesRef.current[from] || []
+        pendingCandidatesRef.current[from].push(candidate)
+        return
+      }
       const ref = pcsRef.current[from]
       if (ref && ref.pc && candidate) {
         try { await ref.pc.addIceCandidate(new RTCIceCandidate(candidate)) } catch (e) { console.warn(e) }
@@ -98,7 +107,14 @@ export default function App() {
     audio.controls = false
     audio.id = `audio-${peerId}`
     audio.volume = volume
+    audio.playsInline = true
+    audio.muted = false
     audioContainerRef.current?.appendChild(audio)
+    // try to play in case browser requires a user gesture
+    const tryPlay = async () => {
+      try { await audio.play() } catch (e) { /* may be blocked until user gesture */ }
+    }
+    tryPlay()
     return audio
   }
 
@@ -125,7 +141,10 @@ export default function App() {
     }
 
     pc.ontrack = (ev) => {
-      if (ref.audioEl) ref.audioEl.srcObject = ev.streams[0]
+      if (ref.audioEl) {
+        ref.audioEl.srcObject = ev.streams[0]
+        try { ref.audioEl.play().catch(()=>{}) } catch(e){}
+      }
     }
 
     // If local stream exists and we are currently 'speaking', add tracks
@@ -157,6 +176,14 @@ export default function App() {
     const answer = await ref.pc.createAnswer()
     await ref.pc.setLocalDescription(answer)
     socketRef.current.emit('webrtc-answer', { target: from, sdp: ref.pc.localDescription })
+    // flush pending ICE candidates
+    const pending = pendingCandidatesRef.current[from]
+    if (pending && pending.length) {
+      for (const c of pending) {
+        try { await ref.pc.addIceCandidate(new RTCIceCandidate(c)) } catch(e){ console.warn(e) }
+      }
+      delete pendingCandidatesRef.current[from]
+    }
   }
 
   // Volume pointer handlers (click or drag on the custom bar)
