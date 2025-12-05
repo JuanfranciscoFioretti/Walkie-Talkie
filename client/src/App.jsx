@@ -5,11 +5,8 @@ const SERVER_URL = import.meta.env.VITE_SERVER_URL || 'http://localhost:3001'
 
 export default function App() {
   const [socket, setSocket] = useState(null)
-  const [room, setRoom] = useState('general')
-  const [username, setUsername] = useState('Guest')
-  const [connectedUsers, setConnectedUsers] = useState([])
   const [joined, setJoined] = useState(false)
-  const [speaking, setSpeaking] = useState(new Set())
+  const [users, setUsers] = useState([])
   const socketRef = useRef(null)
 
   useEffect(() => {
@@ -17,105 +14,118 @@ export default function App() {
     socketRef.current = s
     setSocket(s)
 
-    s.on('connect', () => console.log('connected to server', s.id))
-    s.on('room-users', ({ users }) => setConnectedUsers(users))
-    s.on('user-joined', (u) => setConnectedUsers((prev) => [...prev, u]))
-    s.on('user-left', ({ id }) => setConnectedUsers((prev) => prev.filter((p) => p.id !== id)))
-    s.on('user-started-speaking', ({ id }) => setSpeaking((prev) => new Set(prev).add(id)))
-    s.on('user-stopped-speaking', ({ id }) => setSpeaking((prev) => {
-      const next = new Set(prev)
-      next.delete(id)
-      return next
-    }))
+    s.on('connect', () => console.log('connected', s.id))
+    s.on('room-users', ({ users }) => setUsers(users))
+    s.on('user-joined', (u) => setUsers((prev) => [...prev, u]))
+    s.on('user-left', ({ id }) => setUsers((prev) => prev.filter((p) => p.id !== id)))
+    s.on('disconnect', () => {
+      setJoined(false)
+      setUsers([])
+    })
 
     return () => s.disconnect()
   }, [])
 
   function joinRoom() {
     if (!socketRef.current) return
-    socketRef.current.emit('join-room', { room, username })
+    socketRef.current.emit('join-room', { room: 'general', username: 'Guest' })
     setJoined(true)
   }
   function leaveRoom() {
     if (!socketRef.current) return
-    socketRef.current.emit('leave-room', { room })
+    socketRef.current.emit('leave-room', { room: 'general' })
     setJoined(false)
-    setConnectedUsers([])
+    setUsers([])
   }
 
-  // Press-to-talk handlers
   function handleStartSpeaking() {
     if (!socketRef.current) return
-    socketRef.current.emit('start-speaking', { room })
-    // local visual
-    setSpeaking((prev) => new Set(prev).add(socketRef.current.id))
+    socketRef.current.emit('start-speaking', { room: 'general' })
   }
   function handleStopSpeaking() {
     if (!socketRef.current) return
-    socketRef.current.emit('stop-speaking', { room })
-    setSpeaking((prev) => {
-      const next = new Set(prev)
-      next.delete(socketRef.current.id)
-      return next
-    })
+    socketRef.current.emit('stop-speaking', { room: 'general' })
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-slate-900 via-slate-800 to-slate-900 text-white">
-      <div className="max-w-3xl mx-auto p-5">
-        <header className="flex items-center justify-between mb-6">
-          <h1 className="text-2xl font-bold">WalkieTalkie Live</h1>
-          <div className="text-sm opacity-80">Server: {SERVER_URL}</div>
-        </header>
+    <div className="relative flex min-h-screen w-full flex-col items-center justify-center overflow-hidden p-4">
+      <div className="absolute inset-0 z-0">
+        <div className="absolute bottom-0 left-[-20%] right-0 top-[-10%] h-[500px] w-[500px] rounded-full bg-[radial-gradient(circle_farthest-side,rgba(37,140,244,0.2),rgba(255,255,255,0))]"></div>
+        <div className="absolute bottom-[-10%] right-[-20%] top-0 h-[500px] w-[500px] rounded-full bg-[radial-gradient(circle_farthest-side,rgba(37,140,244,0.15),rgba(255,255,255,0))]"></div>
+      </div>
 
-        <section className="bg-slate-700/20 rounded-lg p-4 mb-6">
-          <div className="flex gap-2">
-            <input className="flex-1 rounded px-3 py-2 bg-slate-800" value={username} onChange={(e)=>setUsername(e.target.value)}/>
-            <input className="w-40 rounded px-3 py-2 bg-slate-800" value={room} onChange={(e)=>setRoom(e.target.value)} />
-            {!joined ? (
-              <button className="bg-emerald-500 text-slate-900 px-3 rounded" onClick={joinRoom}>Join</button>
-            ) : (
-              <button className="bg-red-500 text-white px-3 rounded" onClick={leaveRoom}>Leave</button>
-            )}
-          </div>
-        </section>
-
-        <section className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="md:col-span-2 bg-slate-700/10 rounded-lg p-4">
-            <h2 className="font-semibold mb-2">Channel: {room}</h2>
-            <div className="space-y-2">
-              {connectedUsers.length === 0 && <div className="text-sm opacity-70">No users in channel</div>}
-              {connectedUsers.map((u) => (
-                <div key={u.id} className="flex items-center justify-between bg-slate-800/40 p-2 rounded">
-                  <div className="flex items-center gap-3">
-                    <div className={`w-3 h-3 rounded-full ${speaking.has(u.id) ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'}`}></div>
-                    <div className="font-medium">{u.username}</div>
-                  </div>
-                  <div className="text-xs opacity-60">{u.id === socketRef.current?.id ? 'You' : u.id.slice(0,6)}</div>
-                </div>
-              ))}
+      <div className="relative z-10 mx-auto flex h-full max-h-[800px] w-full max-w-[420px] flex-col rounded-xl">
+        <div className="glass-effect flex w-full flex-col rounded-[48px] p-6 shadow-2xl">
+          <div className="flex items-center justify-between px-4 pb-4">
+            <div className="flex items-center gap-3">
+              <span className="material-symbols-outlined text-white/80">wifi</span>
+              <span className="text-sm font-medium text-white/80">100%</span>
             </div>
-
-            <div className="mt-6 text-sm opacity-80">Note: Audio & WebRTC coming next. Press and hold the big button to talk.</div>
+            <div className="flex items-center gap-3">
+              <span className="text-sm font-medium text-white/80">95%</span>
+              <span className="material-symbols-outlined text-white/80 -rotate-90">battery_full_alt</span>
+            </div>
           </div>
 
-          <div className="bg-slate-700/10 rounded-lg p-4 flex flex-col items-center justify-center">
-            <div className="mb-3 text-sm opacity-80">Press & Hold to Talk</div>
+          <div className="flex flex-col items-center justify-center py-8">
+            <div className="relative flex h-32 w-32 items-center justify-center">
+              <div className="absolute inset-0 rounded-full bg-primary/20"></div>
+              <div className="absolute inset-2 rounded-full bg-primary/30"></div>
+              <div className="absolute inset-4 rounded-full bg-primary/50 flex items-center justify-center">
+                <span className="material-symbols-outlined text-white text-6xl">cell_tower</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="text-center">
+            <h1 className="font-display text-3xl font-bold leading-tight tracking-tight text-white">Canal General</h1>
+            <p className="font-display text-sm font-normal leading-normal text-green-400">{joined ? 'Conectado' : 'Desconectado'}</p>
+          </div>
+
+          <div className="flex flex-col items-center gap-4 py-8">
+            <div className="w-full max-w-xs">
+              <div className="relative flex w-full flex-col items-start justify-between gap-3 p-4">
+                <div className="flex w-full shrink-[3] items-center justify-between">
+                  <p className="font-display text-base font-medium leading-normal text-white">Volumen</p>
+                  <p className="font-display hidden text-sm font-normal leading-normal text-white @[480px]:block">75%</p>
+                </div>
+                <div className="flex h-4 w-full items-center gap-4">
+                  <div className="flex h-1.5 flex-1 rounded-full bg-white/20">
+                    <div className="h-full w-[75%] rounded-full bg-primary"></div>
+                    <div className="relative">
+                      <div className="absolute -left-2 -top-[5px] h-4 w-4 rounded-full border-2 border-primary bg-background-dark"></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex flex-col items-center gap-6 px-4 py-3">
             <button
-              onMouseDown={handleStartSpeaking}
-              onMouseUp={handleStopSpeaking}
-              onTouchStart={handleStartSpeaking}
-              onTouchEnd={handleStopSpeaking}
-              disabled={!joined}
-              className="w-44 h-44 rounded-full bg-rose-500 flex items-center justify-center text-xl font-bold shadow-lg disabled:opacity-60"
+              onMouseDown={() => (joined ? handleStartSpeaking() : joinRoom())}
+              onMouseUp={() => joined && handleStopSpeaking()}
+              onTouchStart={() => (joined ? handleStartSpeaking() : joinRoom())}
+              onTouchEnd={() => joined && handleStopSpeaking()}
+              className="flex h-16 w-full cursor-pointer items-center justify-center gap-2 overflow-hidden rounded-xl bg-primary px-5 text-white shadow-[0_0_20px_rgba(37,140,244,0.5)] transition-transform duration-200 ease-in-out active:scale-95"
             >
-              {joined ? 'HOLD' : 'JOIN'}
+              <span className="material-symbols-outlined text-white text-2xl">mic</span>
+              <span className="font-display truncate text-lg font-bold leading-normal tracking-[0.015em]">{joined ? 'Pulsar para Hablar' : 'Unirse'}</span>
             </button>
-            <div className="mt-3 text-xs opacity-70">Visual indicator shows who is speaking in the channel.</div>
-          </div>
-        </section>
 
-        <footer className="mt-8 text-xs opacity-70">Prototype: UI + real-time channel signaling powered by Socket.IO.</footer>
+            <div className="flex w-full justify-around gap-2 py-2">
+              <button className="flex h-12 w-12 items-center justify-center rounded-full bg-white/10 text-white/70 transition-colors hover:bg-white/20">
+                <span className="material-symbols-outlined">mic_off</span>
+              </button>
+              <button className="flex h-12 w-12 items-center justify-center rounded-full bg-white/10 text-white/70 transition-colors hover:bg-white/20">
+                <span className="material-symbols-outlined">volume_off</span>
+              </button>
+              <button onClick={leaveRoom} className="flex h-12 w-12 items-center justify-center rounded-full bg-white/10 text-white/70 transition-colors hover:bg-white/20">
+                <span className="material-symbols-outlined">logout</span>
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   )
