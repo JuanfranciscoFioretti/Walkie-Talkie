@@ -5,7 +5,7 @@ import es from './locales/es'
 import da from './locales/da'
 
 const SERVER_URL = import.meta.env.VITE_SERVER_URL || 
-  (import.meta.env.PROD ? `${window.location.protocol}//${window.location.host}/api` : 'http://localhost:3001')
+  (import.meta.env.PROD ? window.location.origin : 'http://localhost:3001')
 
 export default function App() {
   const [socket, setSocket] = useState(null)
@@ -100,17 +100,27 @@ export default function App() {
 
   useEffect(() => {
     console.log('Connecting to server:', SERVER_URL)
-    const s = io(SERVER_URL, {
-      transports: ['websocket', 'polling'],
+    const socketConfig = {
+      transports: ['polling', 'websocket'], // Polling primero para Vercel
       timeout: 20000,
-      forceNew: true
-    })
+      forceNew: true,
+      upgrade: true,
+      rememberUpgrade: false
+    }
+    
+    // Configuración específica para producción en Vercel
+    if (import.meta.env.PROD) {
+      socketConfig.path = '/api/socketio'
+    }
+    
+    const s = io(SERVER_URL, socketConfig)
     socketRef.current = s
     setSocket(s)
 
     s.on('connect', () => {
       console.log('connected', s.id)
       console.log('Connection successful to:', SERVER_URL)
+      console.log('Transport:', s.io.engine.transport.name)
     })
     s.on('connect_error', (error) => {
       console.error('Connection failed:', error)
