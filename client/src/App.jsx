@@ -1,5 +1,8 @@
 import React, { useEffect, useState, useRef } from 'react'
 import { io } from 'socket.io-client'
+import en from './locales/en'
+import es from './locales/es'
+import da from './locales/da'
 
 const SERVER_URL = import.meta.env.VITE_SERVER_URL || 'http://localhost:3001'
 
@@ -16,8 +19,36 @@ export default function App() {
   const [currentRoom, setCurrentRoom] = useState('general')
   const [volume, setVolume] = useState(() => Number(localStorage.getItem('wt_volume') || 0.75))
   const [audioEnabled, setAudioEnabled] = useState(false)
-  // per-peer prefs are stored per-room in localStorage under `wt_peer_prefs_all`:
-  // { [room]: { volumes: {...}, muted: {...} } }
+  const [localMuted, setLocalMuted] = useState(false)
+  const [playbackMuted, setPlaybackMuted] = useState(false)
+  const [localeKey, setLocaleKey] = useState(() => localStorage.getItem('wt_locale') || 'es')
+  const locales = { en, es, da }
+  const t = (k) => (locales[localeKey] && locales[localeKey][k]) || locales.en[k] || k
+
+  const clearLocalData = () => {
+    const keys = ['wt_username','wt_friends','wt_volume','wt_peer_prefs_all','wt_locale','wt_theme','wt_peer_prefs']
+    keys.forEach(k=>localStorage.removeItem(k))
+    Object.keys(localStorage).forEach(k=>{ if (k && k.startsWith('wt_')) localStorage.removeItem(k) })
+    setFriends([])
+    setUsername('')
+    setPeerVolumes({})
+    setPeerMuted({})
+    setLocaleKey('en')
+    setTheme('dark')
+    document.documentElement.classList.remove('light')
+    document.documentElement.classList.add('dark')
+    setSettingsOpen(false)
+    showNotice(t('clearSuccess'))
+  }
+  useEffect(()=>{ localStorage.setItem('wt_locale', localeKey) }, [localeKey])
+
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [theme, setTheme] = useState(() => localStorage.getItem('wt_theme') || 'dark')
+  useEffect(()=>{ document.documentElement.classList.toggle('dark', theme === 'dark'); localStorage.setItem('wt_theme', theme) }, [theme])
+
+  const [notice, setNotice] = useState(null)
+  function showNotice(msg){ setNotice(msg); setTimeout(()=>setNotice(null), 3000) }
+
   const [peerVolumes, setPeerVolumes] = useState({})
   const [peerMuted, setPeerMuted] = useState({})
   const allPeerPrefsRef = useRef({})
@@ -27,13 +58,11 @@ export default function App() {
     } catch (e) {
       allPeerPrefsRef.current = {}
     }
-    // initialize for default room
     const roomPrefs = allPeerPrefsRef.current[currentRoom] || {}
     setPeerVolumes(roomPrefs.volumes || {})
     setPeerMuted(roomPrefs.muted || {})
   }, [])
 
-  // when room changes, load prefs for that room
   useEffect(() => {
     const roomPrefs = allPeerPrefsRef.current[currentRoom] || {}
     setPeerVolumes(roomPrefs.volumes || {})
@@ -41,13 +70,17 @@ export default function App() {
   }, [currentRoom])
 
   const socketRef = useRef(null)
-  const pcsRef = useRef({}) // peerId -> { pc, senders: [], audioEl }
+  const pcsRef = useRef({})
   const localStreamRef = useRef(null)
   const audioContainerRef = useRef(null)
   const volumeBarRef = useRef(null)
   const draggingVolumeRef = useRef(false)
   const audioEnabledRef = useRef(audioEnabled)
   useEffect(()=>{ audioEnabledRef.current = audioEnabled }, [audioEnabled])
+  const localMutedRef = useRef(localMuted)
+  useEffect(()=>{ localMutedRef.current = localMuted }, [localMuted])
+  const playbackMutedRef = useRef(playbackMuted)
+  useEffect(()=>{ playbackMutedRef.current = playbackMuted }, [playbackMuted])
   const peerVolumesRef = useRef(peerVolumes)
   const peerMutedRef = useRef(peerMuted)
   useEffect(()=>{ peerVolumesRef.current = peerVolumes }, [peerVolumes])
@@ -55,7 +88,6 @@ export default function App() {
   
   const [localSpeaking, setLocalSpeaking] = useState(false)
 
-  // persist peer prefs per-room
   function persistPeerPrefs(vols, muts) {
     try {
       allPeerPrefsRef.current[currentRoom] = { volumes: vols, muted: muts }
@@ -90,7 +122,6 @@ export default function App() {
     })
     s.on('webrtc-ice-candidate', async (data) => {
       const { from, candidate } = data
-      // If we don't have a pc yet, buffer the candidate
       if (!pcsRef.current[from]) {
         pendingCandidatesRef.current[from] = pendingCandidatesRef.current[from] || []
         pendingCandidatesRef.current[from].push(candidate)
@@ -124,7 +155,6 @@ export default function App() {
 
   useEffect(()=>{
     localStorage.setItem('wt_volume', String(volume))
-    // apply global volume only where no per-peer override exists
     Object.entries(pcsRef.current).forEach(([id, r]) => {
       if (r.audioEl) {
         const pvol = peerVolumesRef.current[id]
@@ -135,7 +165,6 @@ export default function App() {
 
   function handleRoomUsers(list) {
     setUsers(list)
-    // when joining, create offers to existing users
     list.forEach((u) => {
       if (u.id === socketRef.current.id) return
       if (!pcsRef.current[u.id]) createPeerConnection(u.id, true)
@@ -143,7 +172,6 @@ export default function App() {
   }
   function handleUserJoined(u) {
     setUsers((prev)=>[...prev, u])
-    // existing users will receive 'user-joined'; do nothing (we'll answer offers)
   }
   function handleUserLeft(id) {
     setUsers((prev)=>prev.filter(p=>p.id!==id))
@@ -167,18 +195,15 @@ export default function App() {
     audio.autoplay = true
     audio.controls = false
     audio.id = `audio-${peerId}`
-    // apply per-peer volume if present, otherwise global
     const pvol = peerVolumesRef.current[peerId]
     audio.volume = typeof pvol === 'number' ? pvol : volume
     audio.playsInline = true
     audio.muted = !!peerMutedRef.current[peerId]
     audioContainerRef.current?.appendChild(audio)
-    // try to play in case browser requires a user gesture
     const tryPlay = async () => {
       try {
-        // only attempt play if user already enabled audio or else it will be blocked
         if (audioEnabledRef.current) await audio.play()
-      } catch (e) { /* may be blocked until user gesture */ }
+      } catch (e) {}
     }
     tryPlay()
     return audio
@@ -220,14 +245,12 @@ export default function App() {
       if (ref.audioEl) {
         ref.audioEl.srcObject = ev.streams[0]
         try { ref.audioEl.play().catch(()=>{}) } catch(e){}
-        // ensure volume/mute are applied when track arrives
         const pvol = peerVolumesRef.current[peerId]
         ref.audioEl.volume = typeof pvol === 'number' ? pvol : volume
         ref.audioEl.muted = !!peerMutedRef.current[peerId]
       }
     }
 
-    // If local stream exists and we are currently 'speaking', add tracks
     if (localStreamRef.current) {
       localStreamRef.current.getAudioTracks().forEach((t) => {
         const sender = pc.addTrack(t, localStreamRef.current)
@@ -246,17 +269,14 @@ export default function App() {
   }
 
   async function handleRemoteOffer(from, sdp) {
-    // create pc if not exists
     if (!pcsRef.current[from]) await createPeerConnection(from, false)
     const ref = pcsRef.current[from]
     await ref.pc.setRemoteDescription(new RTCSessionDescription(sdp))
-    // ensure local stream and add tracks if available
     const stream = await ensureLocalStream()
     if (stream) stream.getAudioTracks().forEach(t => { try { ref.senders.push(ref.pc.addTrack(t, stream)) } catch(e){} })
     const answer = await ref.pc.createAnswer()
     await ref.pc.setLocalDescription(answer)
     socketRef.current.emit('webrtc-answer', { target: from, sdp: ref.pc.localDescription })
-    // flush pending ICE candidates
     const pending = pendingCandidatesRef.current[from]
     if (pending && pending.length) {
       for (const c of pending) {
@@ -266,7 +286,6 @@ export default function App() {
     }
   }
 
-  // per-peer volume/mute helpers
   function setPeerVolume(peerId, val) {
     setPeerVolumes((prev) => {
       const next = { ...prev, [peerId]: val }
@@ -287,7 +306,6 @@ export default function App() {
     })
   }
 
-  // Volume pointer handlers (click or drag on the custom bar)
   function computeVolumeFromClientX(clientX) {
     const el = volumeBarRef.current
     if (!el) return 0
@@ -320,6 +338,29 @@ export default function App() {
     window.addEventListener('touchend', upHandler)
   }
 
+  function toggleLocalMute() {
+    setLocalMuted((prev) => {
+      const next = !prev
+      try {
+        if (localStreamRef.current) {
+          localStreamRef.current.getAudioTracks().forEach(t => { t.enabled = !next })
+        }
+      } catch (e) { console.warn('toggleLocalMute failed', e) }
+      return next
+    })
+  }
+
+  function togglePlaybackMute() {
+    setPlaybackMuted((prev) => {
+      const next = !prev
+      try {
+        const nodes = audioContainerRef.current?.querySelectorAll('audio') || []
+        for (const a of nodes) { a.muted = next }
+      } catch (e) { console.warn('togglePlaybackMute failed', e) }
+      return next
+    })
+  }
+
   async function joinRoom(room = 'general') {
     if (!socketRef.current) return
     socketRef.current.emit('join-room', { room, username })
@@ -337,7 +378,6 @@ export default function App() {
 
   async function handleStartSpeaking() {
     await ensureLocalStream()
-    // add tracks to existing peer connections
     Object.values(pcsRef.current).forEach(ref => {
       if (localStreamRef.current) {
         localStreamRef.current.getAudioTracks().forEach(t => {
@@ -351,7 +391,6 @@ export default function App() {
   }
 
   function handleStopSpeaking() {
-    // remove local senders
     Object.values(pcsRef.current).forEach(ref => {
       ref.senders.forEach(s => {
         try { ref.pc.removeTrack(s) } catch (e) {}
@@ -362,7 +401,6 @@ export default function App() {
     setLocalSpeaking(false)
   }
 
-  // Friend management
   function saveFriends(next) { setFriends(next); localStorage.setItem('wt_friends', JSON.stringify(next)) }
   function addFriend(name) { const trimmed = (name||'').trim(); if(!trimmed) return; if (friends.includes(trimmed)) return; const next=[...friends,trimmed]; saveFriends(next); setFriendInput('') }
   function removeFriend(name) { const next = friends.filter((f)=>f!==name); saveFriends(next) }
@@ -377,33 +415,30 @@ export default function App() {
       </div>
 
       <div className="relative z-10 mx-auto flex h-full max-h-[800px] w-full max-w-[420px] flex-col rounded-xl">
+        
+        <button
+          onClick={()=>setSettingsOpen(s=>!s)}
+          aria-label={settingsOpen ? 'Close settings' : 'Open settings'}
+          className={`absolute top-4 right-5 z-50 flex h-10 w-10 items-center justify-center rounded-full bg-panel/80 text-var ${theme === 'light' ? 'shadow-none' : 'shadow-md'} transition-colors duration-150 ease-in-out hover:brightness-105`}
+        >
+          <span className="material-symbols-outlined">{settingsOpen ? 'arrow_back' : 'settings'}</span>
+        </button>
         <div className="glass-effect flex w-full flex-col rounded-[48px] p-6 shadow-2xl">
-          {/* <div className="flex items-center justify-between px-4 pb-4">
-            <div className="flex items-center gap-3">
-              <span className="material-symbols-outlined text-white/80">wifi</span>
-              <span className="text-sm font-medium text-white/80">100%</span>
-            </div>
-            <div className="flex items-center gap-3">
-              <span className="text-sm font-medium text-white/80">95%</span>
-              <span className="material-symbols-outlined text-white/80 -rotate-90">battery_full_alt</span>
-            </div>
-          </div> */}
-
           <div className="flex flex-col items-center justify-center py-8">
             <div className="relative flex h-32 w-32 items-center justify-center">
               <div className="absolute inset-0 rounded-full bg-primary/20"></div>
               <div className="absolute inset-2 rounded-full bg-primary/30"></div>
-              <div className="absolute inset-4 rounded-full bg-primary/50 flex items-center justify-center">
-                <span className="material-symbols-outlined text-white text-6xl">cell_tower</span>
-              </div>
+                <div className="absolute inset-4 rounded-full bg-icon flex items-center justify-center">
+                  <span className="material-symbols-outlined icon-top text-6xl">cell_tower</span>
+                </div>
             </div>
           </div>
 
-          <div className="text-center">
-            <h1 className="font-display text-3xl font-bold leading-tight tracking-tight text-white">{currentRoom.startsWith('dm-') ? 'Conversación privada' : 'Canal General'}</h1>
-            <p className="font-display text-sm font-normal leading-normal text-green-400">{joined ? 'Conectado' : 'Desconectado'}</p>
+            <div className="text-center">
+            <h1 className="font-display text-3xl font-bold leading-tight tracking-tight text-var">{currentRoom.startsWith('dm-') ? t('chat') : t('channelTitle')}</h1>
+            <p className="font-display text-sm font-normal leading-normal text-green-400">{joined ? t('connected') : t('disconnected')}</p>
             <div className="mt-2 flex items-center justify-center gap-2">
-              <input value={username} onChange={(e)=>setUsername(e.target.value)} className="rounded px-2 py-1 text-sm bg-white/5 text-white placeholder-white/50" placeholder="Tu nombre" />
+              <input value={username} onChange={(e)=>setUsername(e.target.value)} className="rounded px-2 py-1 text-sm bg-input-darker text-var placeholder:text-secondary" placeholder={t('placeholderName')} />
             </div>
           </div>
 
@@ -411,8 +446,8 @@ export default function App() {
             <div className="w-full max-w-xs">
               <div className="relative flex w-full flex-col items-start justify-between gap-3 p-4">
                 <div className="flex w-full shrink-[3] items-center justify-between">
-                  <p className="font-display text-base font-medium leading-normal text-white">Volumen</p>
-                  <p className="font-display text-sm font-normal leading-normal text-white">{Math.round(volume*100)}%</p>
+                  <p className="font-display text-base font-medium leading-normal text-var">{t('volume')}</p>
+                  <p className="font-display text-sm font-normal leading-normal text-secondary">{Math.round(volume*100)}%</p>
                 </div>
                 <div className="flex h-6 w-full items-center gap-4">
                   <div
@@ -426,28 +461,28 @@ export default function App() {
                         <div className="h-full rounded-full bg-primary" style={{ width: `${Math.round(volume*100)}%` }} />
                       </div>
                     </div>
-                    <div
-                      className="absolute -top-2 h-4 w-4 rounded-full border-2 border-primary bg-background-dark"
-                      style={{ left: `calc(${Math.round(volume*100)}% - 0.5rem)` }}
-                    />
+                      <div
+                        className="absolute h-4 w-4 rounded-full border-2 border-primary knob-bg"
+                        style={{ left: `${Math.round(volume*100)}%`, top: '50%', transform: 'translate(-50%, -50%)' }}
+                      />
                   </div>
                 </div>
               </div>
             </div>
             <div className="w-full max-w-xs pt-4">
-              <div className="mb-2 flex items-center justify-between">
-                <div className="text-sm font-medium text-white">Participantes</div>
+                <div className="mb-2 flex items-center justify-between">
+                <div className="text-sm font-medium text-var">{t('participants')}</div>
               </div>
               <div className="mt-1 space-y-2">
-                {users.length === 0 && <div className="text-sm opacity-70">No hay participantes</div>}
+                {users.length === 0 && <div className="text-sm opacity-70 text-secondary">{t('noParticipants')}</div>}
                 {users.map((u) => (
                   <div key={u.id} className="flex items-center justify-between bg-slate-800/30 p-2 rounded">
                     <div className="flex items-center gap-3">
                       <div className={`w-3 h-3 rounded-full ${speakingPeers.has(u.id) ? 'bg-emerald-400 animate-pulse' : (u.id === socketRef.current?.id ? 'bg-emerald-300' : 'bg-slate-500')}`}></div>
-                      <div className="font-medium text-white">{u.username}</div>
+                      <div className="font-medium text-var">{u.username}</div>
                     </div>
                     <div className="flex items-center gap-2">
-                      <button onClick={()=>togglePeerMute(u.id)} className="px-2 py-1 rounded bg-white/5 text-white/80 text-sm">{peerMuted[u.id] ? 'Unmute' : 'Mute'}</button>
+                      <button onClick={()=>togglePeerMute(u.id)} className="px-2 py-1 rounded bg-input text-secondary text-sm">{peerMuted[u.id] ? t('unmute') : t('mute')}</button>
                       <input type="range" min="0" max="1" step="0.01" value={peerVolumes[u.id] ?? volume} onChange={(e)=>setPeerVolume(u.id, Number(e.target.value))} className="w-24" />
                     </div>
                   </div>
@@ -455,20 +490,19 @@ export default function App() {
               </div>
 
               <div className="mt-4 mb-2 flex items-center justify-between">
-                <div className="text-sm font-medium text-white">Amigos</div>
+                <div className="text-sm font-medium text-var">{t('friends')}</div>
               </div>
               <div className="flex gap-2">
-                <input className="flex-1 rounded px-3 py-2 bg-slate-800 text-white" value={friendInput} onChange={(e)=>setFriendInput(e.target.value)} placeholder="Añadir amigo" />
-                <button className="bg-primary px-3 rounded text-sm" onClick={()=>addFriend(friendInput)}>Añadir</button>
+                <input className="flex-1 rounded px-3 py-2 bg-input-darker text-var" value={friendInput} onChange={(e)=>setFriendInput(e.target.value)} placeholder={t('addFriend')} />
+                <button className="bg-primary px-3 rounded text-sm whitespace-nowrap text-add-friend" onClick={()=>addFriend(friendInput)}>{t('addFriend')}</button>
               </div>
               <div className="mt-3 space-y-2">
-                {friends.length === 0 && <div className="text-sm opacity-70">No tienes amigos añadidos</div>}
+                {friends.length === 0 && <div className="text-sm opacity-70">{t('noFriends')}</div>}
                 {friends.map((f) => (
-                  <div key={f} className="flex items-center justify-between bg-slate-800/30 p-2 rounded">
-                    <div className="font-medium text-white">{f}</div>
+                  <div key={f} className="flex items-center justify-between bg-input-darker p-2 rounded">
+                    <div className="font-medium text-var">{f}</div>
                     <div className="flex items-center gap-2">
                       {(() => {
-                        const dm = (['Guest', username].map ? (() => {}) : null) // noop to keep linter happy
                         const pair = [username||'Guest', f].map(s => s.replace(/\s+/g, '_'))
                         const dmRoom = `dm-${pair.sort().join('-')}`
                         const disabled = currentRoom === dmRoom
@@ -476,13 +510,13 @@ export default function App() {
                           <button
                             disabled={disabled}
                             onClick={() => !disabled && startDM(f)}
-                            className={`text-sm px-2 py-1 rounded ${disabled ? 'bg-white/10 text-white/50 cursor-not-allowed' : 'bg-emerald-500'}`}
+                            className={`text-sm px-2 py-1 rounded ${disabled ? 'bg-white/10 text-secondary cursor-not-allowed' : 'bg-emerald-500 text-chat'}`}
                           >
-                            {disabled ? 'Chat abierto' : 'Chat'}
+                              {disabled ? t('chatOpen') : t('chat')}
                           </button>
                         )
                       })()}
-                      <button className="text-sm px-2 py-1 bg-red-500 rounded" onClick={()=>{ if (confirm(`Eliminar amigo ${f}?`)) removeFriend(f) }}>Eliminar</button>
+                      <button className="text-sm px-2 py-1 bg-red-500 rounded text-delete" onClick={()=>{ if (confirm(`${t('deleteFriendConfirm')} ${f}?`)) removeFriend(f) }}>{t('delete')}</button>
                     </div>
                   </div>
                 ))}
@@ -491,48 +525,104 @@ export default function App() {
           </div>
 
           <div className="flex flex-col items-center gap-6 px-4 py-3">
-            <button
+              <button
               onMouseDown={() => (joined ? handleStartSpeaking() : joinRoom())}
               onMouseUp={() => joined && handleStopSpeaking()}
               onTouchStart={() => (joined ? handleStartSpeaking() : joinRoom())}
               onTouchEnd={() => joined && handleStopSpeaking()}
               className={
-                `flex h-16 w-full cursor-pointer items-center justify-center gap-2 overflow-hidden rounded-xl px-5 text-white shadow-[0_0_20px_rgba(37,140,244,0.5)] transition-transform duration-200 ease-in-out active:scale-95 ` +
+                `flex h-16 w-full cursor-pointer items-center justify-center gap-2 overflow-hidden rounded-xl px-5 text-var shadow-[0_0_20px_rgba(37,140,244,0.5)] transition-transform duration-200 ease-in-out active:scale-95 ` +
                 (localSpeaking ? 'bg-emerald-500 ring-4 ring-primary/30 animate-pulse scale-105' : 'bg-primary')
               }
             >
-              <span className="material-symbols-outlined text-white text-2xl">mic</span>
-              <span className="font-display truncate text-lg font-bold leading-normal tracking-[0.015em]">{joined ? 'Pulsar para Hablar' : 'Unirse'}</span>
+              <span className="material-symbols-outlined text-join text-2xl">mic</span>
+              <span className="font-display truncate text-lg font-bold leading-normal tracking-[0.015em] text-join">{joined ? t('pressToTalk') : t('join')}</span>
             </button>
 
             <div className="flex w-full justify-around gap-2 py-2">
-              <button className="flex h-12 w-12 items-center justify-center rounded-full bg-white/10 text-white/70 transition-colors hover:bg-white/20">
+              <button onClick={toggleLocalMute} className={`flex h-12 w-12 items-center justify-center rounded-full transition-colors ${localMuted ? 'bg-red-500 text-delete' : 'bg-white/10 text-secondary'} hover:brightness-105` }>
                 <span className="material-symbols-outlined">mic_off</span>
               </button>
-              <button className="flex h-12 w-12 items-center justify-center rounded-full bg-white/10 text-white/70 transition-colors hover:bg-white/20">
+              <button onClick={togglePlaybackMute} className={`flex h-12 w-12 items-center justify-center rounded-full transition-colors ${playbackMuted ? 'bg-red-500 text-delete' : 'bg-white/10 text-secondary'} hover:brightness-105` }>
                 <span className="material-symbols-outlined">volume_off</span>
               </button>
-              <button onClick={leaveRoom} className="flex h-12 w-12 items-center justify-center rounded-full bg-white/10 text-white/70 transition-colors hover:bg-white/20">
+              <button onClick={leaveRoom} className="flex h-12 w-12 items-center justify-center rounded-full bg-white/10 text-secondary transition-colors hover:bg-white/20">
                 <span className="material-symbols-outlined">logout</span>
               </button>
               {!audioEnabled ? (
                 <button onClick={async ()=>{
-                  // user gesture: attempt to play any existing audio elements
+                  
                   setAudioEnabled(true)
                   const nodes = audioContainerRef.current?.querySelectorAll('audio') || []
                   for (const a of nodes) {
                     try { a.muted = false; await a.play() } catch(e){}
                   }
-                }} className="flex h-12 items-center px-3 rounded bg-emerald-500 text-slate-900 font-medium">Enable Audio</button>
-              ) : (
-                <button className="flex h-12 items-center px-3 rounded bg-white/10 text-white/70">Audio On</button>
+                  setPlaybackMuted(false)
+                }} className="flex h-12 items-center px-3 rounded bg-emerald-500 text-enable-audio font-medium">{t('enableAudio')}</button>
+                ) : (
+                <button onClick={async ()=>{
+                  
+                  setAudioEnabled(false)
+                  const nodes = audioContainerRef.current?.querySelectorAll('audio') || []
+                  for (const a of nodes) {
+                    try { a.muted = true } catch(e){}
+                  }
+                  setPlaybackMuted(true)
+                }} className="flex h-12 items-center px-3 rounded bg-disable-audio text-enable-audio">{t('disableAudio')}</button>
               )}
             </div>
           </div>
         </div>
       </div>
 
+      
+      <div className="fixed top-4 right-2 z-50">
+        
+        <div
+          className={`mt-2 bg-panel glass-effect rounded-lg p-3 w-[14rem] text-var transition-transform transition-opacity duration-200 ease-in-out ${settingsOpen ? 'opacity-100 translate-x-0 pointer-events-auto' : 'opacity-0 translate-x-6 pointer-events-none'}`}
+          style={{ transformOrigin: 'top right' }}
+        >
+          <div className="flex items-center justify-between mb-2">
+            <div className="text-sm font-medium text-var">{t('settings')}</div>
+          </div>
+          <div className="mb-2">
+            <label className="text-xs text-secondary">{t('language')}</label>
+            <select value={localeKey} onChange={(e)=>setLocaleKey(e.target.value)} className="w-full mt-1 rounded px-2 py-1 bg-input-select text-var">
+              <option value="en">English</option>
+              <option value="da">Dansk</option>
+              <option value="es">Español</option>
+            </select>
+          </div>
+          <div className="mb-2">
+            <label className="text-xs text-secondary">{t('theme')}</label>
+            <div className="mt-1 flex items-center gap-2">
+              <button onClick={()=>setTheme('light')} className={`px-2 py-1 rounded ${theme==='light' ? 'bg-white/10' : 'bg-transparent'} text-var`}>{t('light')}</button>
+              <button onClick={()=>setTheme('dark')} className={`px-2 py-1 rounded ${theme==='dark' ? 'bg-white/10' : 'bg-transparent'} text-var`}>{t('dark')}</button>
+            </div>
+          </div>
+          <div className="mt-2">
+            <button onClick={()=>{ clearLocalData(); }} className="w-full px-3 py-2 rounded bg-red-600 text-white text-sm">{t('clearStorage')}</button>
+          </div>
+        </div>
+      </div>
+
       <div ref={audioContainerRef} style={{ display: 'none' }} />
+      {notice && (
+        <div className="fixed inset-0 z-[99999] flex items-center justify-center">
+          <div
+            className="absolute inset-0"
+            style={{
+              backdropFilter: 'blur(6px)',
+              WebkitBackdropFilter: 'blur(6px)',
+              background: theme === 'dark' ? 'rgba(0,0,0,0.45)' : 'rgba(255,255,255,0.55)'
+            }}
+            aria-hidden="true"
+          />
+          <div className="relative glass-effect bg-panel px-6 py-4 rounded-lg text-var shadow-xl pointer-events-auto max-w-[90%] w-[min(560px,90%)]" role="status" aria-live="polite">
+            <div className="text-lg font-medium">{notice}</div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
