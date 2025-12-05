@@ -9,15 +9,16 @@ export default function App() {
   const [users, setUsers] = useState([])
   const [username, setUsername] = useState(() => localStorage.getItem('wt_username') || 'Guest')
   const [friends, setFriends] = useState(() => {
-    try {
-      return JSON.parse(localStorage.getItem('wt_friends') || '[]')
-    } catch (e) {
-      return []
-    }
+    try { return JSON.parse(localStorage.getItem('wt_friends') || '[]') } catch (e) { return [] }
   })
   const [friendInput, setFriendInput] = useState('')
   const [currentRoom, setCurrentRoom] = useState('general')
+  const [volume, setVolume] = useState(() => Number(localStorage.getItem('wt_volume') || 0.75))
+
   const socketRef = useRef(null)
+  const pcsRef = useRef({}) // peerId -> { pc, senders: [], audioEl }
+  const localStreamRef = useRef(null)
+  const audioContainerRef = useRef(null)
 
   useEffect(() => {
     const s = io(SERVER_URL)
@@ -25,18 +26,138 @@ export default function App() {
     setSocket(s)
 
     s.on('connect', () => console.log('connected', s.id))
-    s.on('room-users', ({ users }) => setUsers(users))
-    s.on('user-joined', (u) => setUsers((prev) => [...prev, u]))
-    s.on('user-left', ({ id }) => setUsers((prev) => prev.filter((p) => p.id !== id)))
-    s.on('disconnect', () => {
-      setJoined(false)
-      setUsers([])
+    s.on('room-users', ({ users }) => handleRoomUsers(users))
+    s.on('user-joined', (u) => handleUserJoined(u))
+    s.on('user-left', ({ id }) => handleUserLeft(id))
+
+    s.on('webrtc-offer', async (data) => {
+      const { from, sdp } = data
+      await handleRemoteOffer(from, sdp)
+    })
+    s.on('webrtc-answer', async (data) => {
+      const { from, sdp } = data
+      const ref = pcsRef.current[from]
+      if (ref && ref.pc) {
+        await ref.pc.setRemoteDescription(new RTCSessionDescription(sdp))
+      }
+    })
+    s.on('webrtc-ice-candidate', async (data) => {
+      const { from, candidate } = data
+      const ref = pcsRef.current[from]
+      if (ref && ref.pc && candidate) {
+        try { await ref.pc.addIceCandidate(new RTCIceCandidate(candidate)) } catch (e) { console.warn(e) }
+      }
     })
 
-    return () => s.disconnect()
+    return () => {
+      s.disconnect()
+      cleanupAllPeers()
+      if (localStreamRef.current) {
+        localStreamRef.current.getTracks().forEach(t=>t.stop())
+        localStreamRef.current = null
+      }
+    }
   }, [])
 
-  function joinRoom(room = 'general') {
+  useEffect(()=>{ localStorage.setItem('wt_volume', String(volume)); Object.values(pcsRef.current).forEach(r => { if (r.audioEl) r.audioEl.volume = volume }) }, [volume])
+
+  function handleRoomUsers(list) {
+    setUsers(list)
+    // when joining, create offers to existing users
+    list.forEach((u) => {
+      if (u.id === socketRef.current.id) return
+      if (!pcsRef.current[u.id]) createPeerConnection(u.id, true)
+    })
+  }
+  function handleUserJoined(u) {
+    setUsers((prev)=>[...prev, u])
+    // existing users will receive 'user-joined'; do nothing (we'll answer offers)
+  }
+  function handleUserLeft(id) {
+    setUsers((prev)=>prev.filter(p=>p.id!==id))
+    removePeer(id)
+  }
+
+  async function ensureLocalStream() {
+    if (!localStreamRef.current) {
+      try {
+        const s = await navigator.mediaDevices.getUserMedia({ audio: true })
+        localStreamRef.current = s
+      } catch (e) {
+        console.warn('mic access denied', e)
+      }
+    }
+    return localStreamRef.current
+  }
+
+  function createAudioElement(peerId) {
+    const audio = document.createElement('audio')
+    audio.autoplay = true
+    audio.controls = false
+    audio.id = `audio-${peerId}`
+    audio.volume = volume
+    audioContainerRef.current?.appendChild(audio)
+    return audio
+  }
+
+  function cleanupAllPeers() {
+    Object.keys(pcsRef.current).forEach(removePeer)
+  }
+
+  function removePeer(peerId) {
+    const ref = pcsRef.current[peerId]
+    if (!ref) return
+    try { ref.pc.close() } catch(e){}
+    if (ref.audioEl && ref.audioEl.parentNode) ref.audioEl.parentNode.removeChild(ref.audioEl)
+    delete pcsRef.current[peerId]
+  }
+
+  async function createPeerConnection(peerId, isOfferer = false) {
+    if (pcsRef.current[peerId]) return
+    const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] })
+    const ref = { pc, senders: [], audioEl: createAudioElement(peerId) }
+    pcsRef.current[peerId] = ref
+
+    pc.onicecandidate = (e) => {
+      if (e.candidate) socketRef.current.emit('webrtc-ice-candidate', { target: peerId, candidate: e.candidate })
+    }
+
+    pc.ontrack = (ev) => {
+      if (ref.audioEl) ref.audioEl.srcObject = ev.streams[0]
+    }
+
+    // If local stream exists and we are currently 'speaking', add tracks
+    if (localStreamRef.current) {
+      localStreamRef.current.getAudioTracks().forEach((t) => {
+        const sender = pc.addTrack(t, localStreamRef.current)
+        ref.senders.push(sender)
+      })
+    }
+
+    if (isOfferer) {
+      try {
+        const offer = await pc.createOffer()
+        await pc.setLocalDescription(offer)
+        socketRef.current.emit('webrtc-offer', { target: peerId, sdp: pc.localDescription })
+      } catch (e) { console.warn(e) }
+    }
+    return pc
+  }
+
+  async function handleRemoteOffer(from, sdp) {
+    // create pc if not exists
+    if (!pcsRef.current[from]) await createPeerConnection(from, false)
+    const ref = pcsRef.current[from]
+    await ref.pc.setRemoteDescription(new RTCSessionDescription(sdp))
+    // ensure local stream and add tracks if available
+    const stream = await ensureLocalStream()
+    if (stream) stream.getAudioTracks().forEach(t => { try { ref.senders.push(ref.pc.addTrack(t, stream)) } catch(e){} })
+    const answer = await ref.pc.createAnswer()
+    await ref.pc.setLocalDescription(answer)
+    socketRef.current.emit('webrtc-answer', { target: from, sdp: ref.pc.localDescription })
+  }
+
+  async function joinRoom(room = 'general') {
     if (!socketRef.current) return
     socketRef.current.emit('join-room', { room, username })
     setCurrentRoom(room)
@@ -48,45 +169,40 @@ export default function App() {
     setJoined(false)
     setUsers([])
     setCurrentRoom('general')
+    cleanupAllPeers()
   }
 
-  function handleStartSpeaking() {
-    if (!socketRef.current) return
+  async function handleStartSpeaking() {
+    await ensureLocalStream()
+    // add tracks to existing peer connections
+    Object.values(pcsRef.current).forEach(ref => {
+      if (localStreamRef.current) {
+        localStreamRef.current.getAudioTracks().forEach(t => {
+          const sender = ref.pc.addTrack(t, localStreamRef.current)
+          ref.senders.push(sender)
+        })
+      }
+    })
     socketRef.current.emit('start-speaking', { room: currentRoom })
   }
+
   function handleStopSpeaking() {
-    if (!socketRef.current) return
+    // remove local senders
+    Object.values(pcsRef.current).forEach(ref => {
+      ref.senders.forEach(s => {
+        try { ref.pc.removeTrack(s) } catch (e) {}
+      })
+      ref.senders = []
+    })
     socketRef.current.emit('stop-speaking', { room: currentRoom })
   }
 
   // Friend management
-  function saveFriends(next) {
-    setFriends(next)
-    localStorage.setItem('wt_friends', JSON.stringify(next))
-  }
-  function addFriend(name) {
-    const trimmed = (name || '').trim()
-    if (!trimmed) return
-    if (friends.includes(trimmed)) return
-    const next = [...friends, trimmed]
-    saveFriends(next)
-    setFriendInput('')
-  }
-  function removeFriend(name) {
-    const next = friends.filter((f) => f !== name)
-    saveFriends(next)
-  }
-  function startDM(friend) {
-    // deterministic room name for DM between two users
-    const pair = [username || 'Guest', friend].map((s) => s.replace(/\s+/g, '_'))
-    const room = `dm-${pair.sort().join('-')}`
-    joinRoom(room)
-  }
-
-  // persist username
-  useEffect(() => {
-    localStorage.setItem('wt_username', username)
-  }, [username])
+  function saveFriends(next) { setFriends(next); localStorage.setItem('wt_friends', JSON.stringify(next)) }
+  function addFriend(name) { const trimmed = (name||'').trim(); if(!trimmed) return; if (friends.includes(trimmed)) return; const next=[...friends,trimmed]; saveFriends(next); setFriendInput('') }
+  function removeFriend(name) { const next = friends.filter((f)=>f!==name); saveFriends(next) }
+  function startDM(friend) { const pair = [username||'Guest', friend].map(s=>s.replace(/\s+/g,'_')); const room = `dm-${pair.sort().join('-')}`; joinRoom(room) }
+  useEffect(()=>{ localStorage.setItem('wt_username', username) }, [username])
 
   return (
     <div className="relative flex min-h-screen w-full flex-col items-center justify-center overflow-hidden p-4">
@@ -122,12 +238,7 @@ export default function App() {
             <h1 className="font-display text-3xl font-bold leading-tight tracking-tight text-white">{currentRoom.startsWith('dm-') ? 'Conversación privada' : 'Canal General'}</h1>
             <p className="font-display text-sm font-normal leading-normal text-green-400">{joined ? 'Conectado' : 'Desconectado'}</p>
             <div className="mt-2 flex items-center justify-center gap-2">
-              <input
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                className="rounded px-2 py-1 text-sm bg-white/5 text-white placeholder-white/50"
-                placeholder="Tu nombre"
-              />
+              <input value={username} onChange={(e)=>setUsername(e.target.value)} className="rounded px-2 py-1 text-sm bg-white/5 text-white placeholder-white/50" placeholder="Tu nombre" />
             </div>
           </div>
 
@@ -136,15 +247,10 @@ export default function App() {
               <div className="relative flex w-full flex-col items-start justify-between gap-3 p-4">
                 <div className="flex w-full shrink-[3] items-center justify-between">
                   <p className="font-display text-base font-medium leading-normal text-white">Volumen</p>
-                  <p className="font-display hidden text-sm font-normal leading-normal text-white @[480px]:block">75%</p>
+                  <p className="font-display text-sm font-normal leading-normal text-white">{Math.round(volume*100)}%</p>
                 </div>
                 <div className="flex h-4 w-full items-center gap-4">
-                  <div className="flex h-1.5 flex-1 rounded-full bg-white/20">
-                    <div className="h-full w-[75%] rounded-full bg-primary"></div>
-                    <div className="relative">
-                      <div className="absolute -left-2 -top-[5px] h-4 w-4 rounded-full border-2 border-primary bg-background-dark"></div>
-                    </div>
-                  </div>
+                  <input type="range" min="0" max="1" step="0.01" value={volume} onChange={(e)=>setVolume(Number(e.target.value))} className="w-full" />
                 </div>
               </div>
             </div>
@@ -197,6 +303,8 @@ export default function App() {
           </div>
         </div>
       </div>
+
+      <div ref={audioContainerRef} style={{ display: 'none' }} />
     </div>
   )
 }
