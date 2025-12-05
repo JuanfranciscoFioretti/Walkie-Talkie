@@ -360,7 +360,7 @@ export default function App() {
   useEffect(()=>{ localStorage.setItem('wt_username', username) }, [username])
 
   return (
-    <div className="relative flex min-h-screen w-full flex-col items-center justify-center overflow-hidden p-4">
+    <div className="relative flex min-h-screen w-full flex-col items-center justify-center overflow-hidden p-4 pb-20">
       <div className="absolute inset-0 z-0">
         <div className="absolute bottom-0 left-[-20%] right-0 top-[-10%] h-[500px] w-[500px] rounded-full bg-[radial-gradient(circle_farthest-side,rgba(37,140,244,0.2),rgba(255,255,255,0))]"></div>
         <div className="absolute bottom-[-10%] right-[-20%] top-0 h-[500px] w-[500px] rounded-full bg-[radial-gradient(circle_farthest-side,rgba(37,140,244,0.15),rgba(255,255,255,0))]"></div>
