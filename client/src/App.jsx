@@ -103,7 +103,7 @@ export default function App() {
     const s = io(SERVER_URL, {
       path: '/api/socket.io',
       transports: ['polling'],
-      forceNew: true
+      upgrade: false
     })
     socketRef.current = s
     setSocket(s)
