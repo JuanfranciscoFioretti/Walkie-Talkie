@@ -206,6 +206,16 @@ export default function App() {
       if (e.candidate) socketRef.current.emit('webrtc-ice-candidate', { target: peerId, candidate: e.candidate })
     }
 
+    pc.onnegotiationneeded = async () => {
+      try {
+        const offer = await pc.createOffer()
+        await pc.setLocalDescription(offer)
+        socketRef.current.emit('webrtc-offer', { target: peerId, sdp: pc.localDescription })
+      } catch (err) {
+        console.warn('negotiationneeded failed', err)
+      }
+    }
+
     pc.ontrack = (ev) => {
       if (ref.audioEl) {
         ref.audioEl.srcObject = ev.streams[0]
@@ -360,7 +370,7 @@ export default function App() {
   useEffect(()=>{ localStorage.setItem('wt_username', username) }, [username])
 
   return (
-    <div className="relative flex min-h-screen w-full flex-col items-center justify-center overflow-hidden p-4 pb-20">
+    <div className="relative flex min-h-screen w-full flex-col items-center justify-center overflow-hidden p-4 pb-40">
       <div className="absolute inset-0 z-0">
         <div className="absolute bottom-0 left-[-20%] right-0 top-[-10%] h-[500px] w-[500px] rounded-full bg-[radial-gradient(circle_farthest-side,rgba(37,140,244,0.2),rgba(255,255,255,0))]"></div>
         <div className="absolute bottom-[-10%] right-[-20%] top-0 h-[500px] w-[500px] rounded-full bg-[radial-gradient(circle_farthest-side,rgba(37,140,244,0.15),rgba(255,255,255,0))]"></div>
@@ -368,7 +378,7 @@ export default function App() {
 
       <div className="relative z-10 mx-auto flex h-full max-h-[800px] w-full max-w-[420px] flex-col rounded-xl">
         <div className="glass-effect flex w-full flex-col rounded-[48px] p-6 shadow-2xl">
-          <div className="flex items-center justify-between px-4 pb-4">
+          {/* <div className="flex items-center justify-between px-4 pb-4">
             <div className="flex items-center gap-3">
               <span className="material-symbols-outlined text-white/80">wifi</span>
               <span className="text-sm font-medium text-white/80">100%</span>
@@ -377,7 +387,7 @@ export default function App() {
               <span className="text-sm font-medium text-white/80">95%</span>
               <span className="material-symbols-outlined text-white/80 -rotate-90">battery_full_alt</span>
             </div>
-          </div>
+          </div> */}
 
           <div className="flex flex-col items-center justify-center py-8">
             <div className="relative flex h-32 w-32 items-center justify-center">
@@ -457,7 +467,21 @@ export default function App() {
                   <div key={f} className="flex items-center justify-between bg-slate-800/30 p-2 rounded">
                     <div className="font-medium text-white">{f}</div>
                     <div className="flex items-center gap-2">
-                      <button className="text-sm px-2 py-1 bg-emerald-500 rounded" onClick={()=>startDM(f)}>Chat</button>
+                      {(() => {
+                        const dm = (['Guest', username].map ? (() => {}) : null) // noop to keep linter happy
+                        const pair = [username||'Guest', f].map(s => s.replace(/\s+/g, '_'))
+                        const dmRoom = `dm-${pair.sort().join('-')}`
+                        const disabled = currentRoom === dmRoom
+                        return (
+                          <button
+                            disabled={disabled}
+                            onClick={() => !disabled && startDM(f)}
+                            className={`text-sm px-2 py-1 rounded ${disabled ? 'bg-white/10 text-white/50 cursor-not-allowed' : 'bg-emerald-500'}`}
+                          >
+                            {disabled ? 'Chat abierto' : 'Chat'}
+                          </button>
+                        )
+                      })()}
                       <button className="text-sm px-2 py-1 bg-red-500 rounded" onClick={()=>{ if (confirm(`Eliminar amigo ${f}?`)) removeFriend(f) }}>Eliminar</button>
                     </div>
                   </div>
