@@ -19,6 +19,8 @@ export default function App() {
   const pcsRef = useRef({}) // peerId -> { pc, senders: [], audioEl }
   const localStreamRef = useRef(null)
   const audioContainerRef = useRef(null)
+  const volumeBarRef = useRef(null)
+  const draggingVolumeRef = useRef(false)
 
   useEffect(() => {
     const s = io(SERVER_URL)
@@ -157,6 +159,39 @@ export default function App() {
     socketRef.current.emit('webrtc-answer', { target: from, sdp: ref.pc.localDescription })
   }
 
+  // Volume pointer handlers (click or drag on the custom bar)
+  function computeVolumeFromClientX(clientX) {
+    const el = volumeBarRef.current
+    if (!el) return 0
+    const rect = el.getBoundingClientRect()
+    const x = Math.min(Math.max(clientX - rect.left, 0), rect.width)
+    return Number((x / rect.width).toFixed(2))
+  }
+
+  function handleVolumePointerDown(e) {
+    e.preventDefault()
+    draggingVolumeRef.current = true
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX
+    setVolume(computeVolumeFromClientX(clientX))
+
+    function moveHandler(evt) {
+      const cx = evt.touches ? evt.touches[0].clientX : evt.clientX
+      setVolume(computeVolumeFromClientX(cx))
+    }
+    function upHandler() {
+      draggingVolumeRef.current = false
+      window.removeEventListener('mousemove', moveHandler)
+      window.removeEventListener('touchmove', moveHandler)
+      window.removeEventListener('mouseup', upHandler)
+      window.removeEventListener('touchend', upHandler)
+    }
+
+    window.addEventListener('mousemove', moveHandler)
+    window.addEventListener('touchmove', moveHandler, { passive: false })
+    window.addEventListener('mouseup', upHandler)
+    window.addEventListener('touchend', upHandler)
+  }
+
   async function joinRoom(room = 'general') {
     if (!socketRef.current) return
     socketRef.current.emit('join-room', { room, username })
@@ -249,8 +284,23 @@ export default function App() {
                   <p className="font-display text-base font-medium leading-normal text-white">Volumen</p>
                   <p className="font-display text-sm font-normal leading-normal text-white">{Math.round(volume*100)}%</p>
                 </div>
-                <div className="flex h-4 w-full items-center gap-4">
-                  <input type="range" min="0" max="1" step="0.01" value={volume} onChange={(e)=>setVolume(Number(e.target.value))} className="w-full" />
+                <div className="flex h-6 w-full items-center gap-4">
+                  <div
+                    ref={volumeBarRef}
+                    className="relative w-full"
+                    onMouseDown={(e)=>handleVolumePointerDown(e)}
+                    onTouchStart={(e)=>handleVolumePointerDown(e)}
+                  >
+                    <div className="flex h-1.5 w-full items-center">
+                      <div className="h-1.5 flex-1 rounded-full bg-white/20">
+                        <div className="h-full rounded-full bg-primary" style={{ width: `${Math.round(volume*100)}%` }} />
+                      </div>
+                    </div>
+                    <div
+                      className="absolute -top-2 h-4 w-4 rounded-full border-2 border-primary bg-background-dark"
+                      style={{ left: `calc(${Math.round(volume*100)}% - 0.5rem)` }}
+                    />
+                  </div>
                 </div>
               </div>
             </div>
