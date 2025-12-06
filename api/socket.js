@@ -2,15 +2,24 @@ import { Server } from 'socket.io'
 
 export default function handler(req, res) {
   if (!res.socket.server.io) {
+    console.log('Creating new Socket.IO server instance')
     const io = new Server(res.socket.server, {
       path: '/api/socket.io',
       addTrailingSlash: false,
-      transports: ['polling', 'websocket'],
+      // Serverless: polling ONLY, no WebSocket
+      transports: ['polling'],
+      allowUpgrades: false,
+      pingTimeout: 60000,
+      pingInterval: 25000,
       cors: {
         origin: '*',
-        methods: ['GET', 'POST'],
-        credentials: true
-      }
+        methods: ['GET', 'POST', 'OPTIONS'],
+        credentials: true,
+        allowedHeaders: ['*']
+      },
+      // Serverless optimizations
+      connectTimeout: 45000,
+      maxHttpBufferSize: 1e6
     })
 
     io.on('connection', (socket) => {

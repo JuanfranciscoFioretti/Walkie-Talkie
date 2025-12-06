@@ -112,13 +112,17 @@ export default function App() {
     
     const socketConfig = {
       path: isVercelProduction ? '/api/socket.io' : '/socket.io',
-      transports: ['polling', 'websocket'],
-      upgrade: true,
+      // Vercel serverless: ONLY polling, no WebSocket upgrade
+      transports: isVercelProduction ? ['polling'] : ['websocket', 'polling'],
+      upgrade: false,
       timeout: 20000,
-      forceNew: true
+      forceNew: true,
+      reconnection: true,
+      reconnectionDelay: 1000,
+      reconnectionAttempts: 10
     }
     
-    console.log('Socket config:', { isVercelProduction, path: socketConfig.path, url: SERVER_URL })
+    console.log('Socket config:', { isVercelProduction, path: socketConfig.path, transports: socketConfig.transports, url: SERVER_URL })
     const s = io(SERVER_URL, socketConfig)
     socketRef.current = s
     setSocket(s)
