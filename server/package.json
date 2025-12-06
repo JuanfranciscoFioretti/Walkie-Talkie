@@ -4,10 +4,12 @@
   "main": "index.js",
   "type": "commonjs",
   "engines": {
-    "node": ">=18.x"
+    "node": ">=18.x",
+    "npm": ">=9.x"
   },
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "dev": "node index.js"
   },
   "dependencies": {
     "cors": "^2.8.5",

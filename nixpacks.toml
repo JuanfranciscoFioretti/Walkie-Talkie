@@ -1,0 +1,14 @@
+# Nixpacks configuration for Railway
+providers = ["node"]
+
+[phases.setup]
+nixPkgs = ["nodejs-18_x"]
+
+[phases.install]
+cmds = ["npm ci --prefix server"]
+
+[phases.build]
+cmds = ["echo 'No build step needed'"]
+
+[start]
+cmd = "npm start --prefix server"
