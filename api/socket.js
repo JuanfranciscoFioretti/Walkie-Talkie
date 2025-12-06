@@ -1,6 +1,7 @@
 import { Server } from 'socket.io'
 
 export default function handler(req, res) {
+  // Always create or reuse io instance, but don't call res.end() until Socket.IO is done
   if (!res.socket.server.io) {
     console.log('Creating new Socket.IO server instance')
     const io = new Server(res.socket.server, {
@@ -74,8 +75,8 @@ export default function handler(req, res) {
     })
 
     res.socket.server.io = io
-  } else {
-    console.log('socket.io already running')
   }
-  res.end()
+  
+  // Don't call res.end() - let Socket.IO handle the request lifecycle
+  // The server will respond when Socket.IO finishes processing
 }
