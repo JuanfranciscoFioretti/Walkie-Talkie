@@ -5,9 +5,11 @@ export default function handler(req, res) {
     const io = new Server(res.socket.server, {
       path: '/api/socket.io',
       addTrailingSlash: false,
+      transports: ['polling', 'websocket'],
       cors: {
         origin: '*',
-        methods: ['GET', 'POST']
+        methods: ['GET', 'POST'],
+        credentials: true
       }
     })
 

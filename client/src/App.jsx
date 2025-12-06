@@ -100,13 +100,16 @@ export default function App() {
 
   useEffect(() => {
     console.log('Connecting to server:', SERVER_URL)
+    const isProduction = import.meta.env.PROD && !import.meta.env.VITE_SERVER_URL
     const socketConfig = {
-      transports: ['websocket', 'polling'],
+      path: isProduction ? '/api/socket.io' : '/socket.io',
+      transports: ['polling', 'websocket'],
       upgrade: true,
       timeout: 20000,
       forceNew: true
     }
     
+    console.log('Socket config:', { isProduction, path: socketConfig.path })
     const s = io(SERVER_URL, socketConfig)
     socketRef.current = s
     setSocket(s)
