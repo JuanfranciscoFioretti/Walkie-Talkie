@@ -561,7 +561,7 @@ export default function App() {
         <button
           onClick={()=>setSettingsOpen(s=>!s)}
           aria-label={settingsOpen ? 'Close settings' : 'Open settings'}
-          className={`absolute top-4 right-5 z-50 flex h-10 w-10 items-center justify-center rounded-full bg-panel/80 text-var ${theme === 'light' ? 'shadow-none' : 'shadow-md'} transition-colors duration-150 ease-in-out hover:brightness-105`}
+          className={`absolute top-4 right-5 z-50 flex h-10 w-10 items-center justify-center rounded-full bg-panel/80 text-var ${theme === 'light' ? 'shadow-none' : 'shadow-md'} transition-colors duration-150 ease-in-out hover:brightness-105 ${settingsOpen ? 'sm:flex hidden' : ''}`}
         >
           <span className="material-symbols-outlined">{settingsOpen ? 'arrow_back' : 'settings'}</span>
         </button>
@@ -673,9 +673,16 @@ export default function App() {
               onTouchStart={() => (joined ? handleStartSpeaking() : joinRoom())}
               onTouchEnd={() => joined && handleStopSpeaking()}
               className={
-                `flex h-16 w-full cursor-pointer items-center justify-center gap-2 overflow-hidden rounded-xl px-5 text-var shadow-[0_0_20px_rgba(37,140,244,0.5)] transition-transform duration-200 ease-in-out active:scale-95 ` +
-                (localSpeaking ? 'bg-emerald-500 ring-4 ring-primary/30 animate-pulse scale-105' : 'bg-primary')
+                `flex h-16 w-full cursor-pointer items-center justify-center gap-2 overflow-hidden rounded-xl px-5 text-var transition-transform duration-200 ease-in-out active:scale-95 ` +
+                (localSpeaking ? 'bg-emerald-500 ring-4 ring-primary/30 animate-pulse scale-105 shadow-[0_0_20px_rgba(16,185,129,0.6)]' : 'bg-primary shadow-[0_0_20px_rgba(37,140,244,0.5)] animate-[pulse_3s_ease-in-out_infinite]')
               }
+              style={!localSpeaking ? {
+                animation: 'pulse 3s ease-in-out infinite',
+                '@keyframes pulse': {
+                  '0%, 100%': { opacity: 1 },
+                  '50%': { opacity: 0.85 }
+                }
+              } : {}}
             >
               <span className="material-symbols-outlined text-join text-2xl">mic</span>
               <span className="font-display truncate text-lg font-bold leading-normal tracking-[0.015em] text-join">{joined ? t('pressToTalk') : t('join')}</span>
@@ -718,8 +725,8 @@ export default function App() {
       </div>
 
       
-      <div className="fixed top-4 right-2 z-50">
-        
+      {/* Panel de configuración - Desktop (top-right) */}
+      <div className="fixed top-4 right-2 z-50 hidden sm:block">
         <div
           className={`mt-2 bg-panel glass-effect rounded-lg p-3 w-[14rem] text-var transition-transform transition-opacity duration-200 ease-in-out ${settingsOpen ? 'opacity-100 translate-x-0 pointer-events-auto' : 'opacity-0 translate-x-6 pointer-events-none'}`}
           style={{ transformOrigin: 'top right' }}
@@ -747,6 +754,52 @@ export default function App() {
           </div>
         </div>
       </div>
+
+      {/* Panel de configuración - Mobile (centrado con efecto focus) */}
+      {settingsOpen && (
+        <div className="fixed inset-0 z-[99999] flex items-center justify-center sm:hidden">
+          <div
+            className="absolute inset-0"
+            style={{
+              backdropFilter: 'blur(6px)',
+              WebkitBackdropFilter: 'blur(6px)',
+              background: theme === 'dark' ? 'rgba(0,0,0,0.45)' : 'rgba(255,255,255,0.55)'
+            }}
+            onClick={() => setSettingsOpen(false)}
+            aria-hidden="true"
+          />
+          <div className="relative glass-effect bg-panel px-6 py-4 rounded-lg text-var shadow-xl pointer-events-auto max-w-[90%] w-[min(340px,90%)]">
+            <button
+              onClick={() => setSettingsOpen(false)}
+              aria-label="Close settings"
+              className="absolute top-2 right-2 flex h-8 w-8 items-center justify-center rounded-full bg-white/10 text-var hover:bg-white/20 transition-colors"
+            >
+              <span className="material-symbols-outlined text-xl">close</span>
+            </button>
+            <div className="flex items-center justify-between mb-4 pr-6">
+              <div className="text-lg font-medium text-var">{t('settings')}</div>
+            </div>
+            <div className="mb-3">
+              <label className="text-sm text-secondary">{t('language')}</label>
+              <select value={localeKey} onChange={(e)=>setLocaleKey(e.target.value)} className="w-full mt-2 rounded px-3 py-2 bg-input-select text-var">
+                <option value="en">English</option>
+                <option value="da">Dansk</option>
+                <option value="es">Español</option>
+              </select>
+            </div>
+            <div className="mb-3">
+              <label className="text-sm text-secondary">{t('theme')}</label>
+              <div className="mt-2 flex items-center gap-2">
+                <button onClick={()=>setTheme('light')} className={`flex-1 px-3 py-2 rounded ${theme==='light' ? 'bg-white/20' : 'bg-white/5'} text-var`}>{t('light')}</button>
+                <button onClick={()=>setTheme('dark')} className={`flex-1 px-3 py-2 rounded ${theme==='dark' ? 'bg-white/20' : 'bg-white/5'} text-var`}>{t('dark')}</button>
+              </div>
+            </div>
+            <div className="mt-4">
+              <button onClick={()=>{ clearLocalData(); }} className="w-full px-4 py-2 rounded bg-red-600 text-white text-sm font-medium">{t('clearStorage')}</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div ref={audioContainerRef} style={{ display: 'none' }} />
       {notice && (
