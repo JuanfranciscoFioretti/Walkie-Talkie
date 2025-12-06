@@ -100,16 +100,25 @@ export default function App() {
 
   useEffect(() => {
     console.log('Connecting to server:', SERVER_URL)
-    const isProduction = import.meta.env.PROD && !import.meta.env.VITE_SERVER_URL
+    console.log('Environment:', {
+      PROD: import.meta.env.PROD,
+      VITE_SERVER_URL: import.meta.env.VITE_SERVER_URL,
+      origin: typeof window !== 'undefined' ? window.location.origin : 'N/A'
+    })
+    
+    // Use /api/socket.io only when in production AND using same origin (Vercel serverless)
+    const isVercelProduction = import.meta.env.PROD && 
+                               SERVER_URL.includes(window.location.origin)
+    
     const socketConfig = {
-      path: isProduction ? '/api/socket.io' : '/socket.io',
+      path: isVercelProduction ? '/api/socket.io' : '/socket.io',
       transports: ['polling', 'websocket'],
       upgrade: true,
       timeout: 20000,
       forceNew: true
     }
     
-    console.log('Socket config:', { isProduction, path: socketConfig.path })
+    console.log('Socket config:', { isVercelProduction, path: socketConfig.path, url: SERVER_URL })
     const s = io(SERVER_URL, socketConfig)
     socketRef.current = s
     setSocket(s)
