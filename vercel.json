@@ -1,8 +1,11 @@
 {
   "version": 2,
   "buildCommand": "bash build.sh",
-  "public": "client/dist",
   "builds": [
+    {
+      "src": "client/dist/**",
+      "use": "@vercel/static"
+    },
     {
       "src": "api/socket.js",
       "use": "@vercel/node"
@@ -18,9 +21,12 @@
       "dest": "/api/socket.js"
     },
     {
+      "src": "/.*\\..+$",
+      "dest": "client/dist/$1"
+    },
+    {
       "src": "/(.*)",
-      "methods": ["GET", "HEAD"],
-      "dest": "/client/dist/$1"
+      "dest": "/client/dist/index.html"
     }
   ]
 }
