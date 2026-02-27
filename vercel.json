@@ -1,19 +1,20 @@
 {
   "version": 2,
+  "buildCommand": "bash build.sh",
   "builds": [
     {
-      "src": "build.sh",
-      "use": "@vercel/static-build",
+      "src": "api/package.json",
+      "use": "@vercel/node",
       "config": {
-        "distDir": "client/dist"
+        "zeroConfig": true
       }
-    },
-    {
-      "src": "api/socket.js",
-      "use": "@vercel/node"
     }
   ],
   "routes": [
+    {
+      "src": "/api/socket\\.io(.*)",
+      "dest": "/api/socket.js"
+    },
     {
       "src": "/api/(.*)",
       "dest": "/api/socket.js"

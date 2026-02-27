@@ -1,35 +1,37 @@
 import { Server } from 'socket.io'
 
 export default function handler(req, res) {
-  // Always create or reuse io instance, but don't call res.end() until Socket.IO is done
+  // Reuse existing Socket.IO instance or create a new one
   if (!res.socket.server.io) {
-    console.log('Creating new Socket.IO server instance')
+    console.log('[Socket.IO] Creating new server instance')
+    
     const io = new Server(res.socket.server, {
       path: '/api/socket.io',
       addTrailingSlash: false,
-      // Serverless: polling ONLY, no WebSocket
+      // Serverless: polling ONLY, no WebSocket (Vercel limitation)
       transports: ['polling'],
       allowUpgrades: false,
       pingTimeout: 60000,
       pingInterval: 25000,
       cors: {
-        origin: '*',
+        origin: true,
         methods: ['GET', 'POST', 'OPTIONS'],
         credentials: true,
-        allowedHeaders: ['*']
+        allowedHeaders: '*'
       },
       // Serverless optimizations
       connectTimeout: 45000,
-      maxHttpBufferSize: 1e6
+      maxHttpBufferSize: 1e6,
+      serveClient: false
     })
 
     io.on('connection', (socket) => {
-      console.log('socket connected', socket.id)
+      console.log('[Socket.IO] Client connected:', socket.id)
 
       socket.on('join-room', ({ room, username }) => {
         socket.join(room)
         socket.data.username = username || 'Anonymous'
-        console.log(`${socket.id} joined room ${room} as ${socket.data.username}`)
+        console.log(`[Socket.IO] ${socket.id} joined room ${room} as ${socket.data.username}`)
         
         socket.to(room).emit('user-joined', { id: socket.id, username: socket.data.username })
         
@@ -77,6 +79,9 @@ export default function handler(req, res) {
     res.socket.server.io = io
   }
   
-  // Don't call res.end() - let Socket.IO handle the request lifecycle
-  // The server will respond when Socket.IO finishes processing
+  // Socket.IO handles the request - don't call res.end() or res.socket.destroy()
+  // Let Socket.IO manage the connection lifecycle
+  res.socket.server.io.engine.handleUpgrade(req, res.socket, Buffer.alloc(0), (ws) => {
+    res.socket.server.io.engine.ws.emit('connection', ws)
+  })
 }

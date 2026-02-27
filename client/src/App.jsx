@@ -106,41 +106,54 @@ export default function App() {
       origin: typeof window !== 'undefined' ? window.location.origin : 'N/A'
     })
     
-    // Use /api/socket.io only when in production AND using same origin (Vercel serverless)
+    // Detect if we're on Vercel production (same origin as client)
     const isVercelProduction = import.meta.env.PROD && 
-                               SERVER_URL.includes(window.location.origin)
+                               typeof window !== 'undefined' &&
+                               SERVER_URL === window.location.origin
     
     const socketConfig = {
       path: isVercelProduction ? '/api/socket.io' : '/socket.io',
       // Vercel serverless: ONLY polling, no WebSocket upgrade
       transports: isVercelProduction ? ['polling'] : ['websocket', 'polling'],
-      upgrade: false,
-      timeout: 20000,
-      forceNew: true,
       reconnection: true,
       reconnectionDelay: 1000,
-      reconnectionAttempts: 10
+      reconnectionDelayMax: 5000,
+      reconnectionAttempts: Infinity,
+      timeout: 20000,
+      forceNew: false,
+      upgrade: !isVercelProduction
     }
     
-    console.log('Socket config:', { isVercelProduction, path: socketConfig.path, transports: socketConfig.transports, url: SERVER_URL })
+    console.log('Socket config:', { 
+      isVercelProduction, 
+      path: socketConfig.path, 
+      transports: socketConfig.transports, 
+      url: SERVER_URL 
+    })
+    
     const s = io(SERVER_URL, socketConfig)
     socketRef.current = s
     setSocket(s)
 
     s.on('connect', () => {
-      console.log('connected', s.id)
-      console.log('Connection successful to:', SERVER_URL)
+      console.log('✓ Connected successfully to:', SERVER_URL, 'Socket ID:', s.id)
+      showNotice('Connected to server')
     })
+    
     s.on('connect_error', (error) => {
-      console.error('Connection failed:', error)
-      showNotice('Connection error to server')
+      console.error('✗ Connection failed:', error.message || error)
+      showNotice('Connecting to server...')
     })
+    
     s.on('disconnect', (reason) => {
-      console.log('Disconnected:', reason)
+      console.log('✗ Disconnected:', reason)
       if (reason === 'io server disconnect') {
-        s.connect()
+        showNotice('Server disconnected')
+      } else if (reason !== 'io client namespace disconnect') {
+        showNotice('Connection lost, reconnecting...')
       }
     })
+
     s.on('room-users', ({ users }) => handleRoomUsers(users))
     s.on('user-joined', (u) => handleUserJoined(u))
     s.on('user-left', ({ id }) => handleUserLeft(id))
