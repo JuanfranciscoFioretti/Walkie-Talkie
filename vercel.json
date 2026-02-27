@@ -1,6 +1,7 @@
 {
   "version": 2,
   "buildCommand": "bash build.sh",
+  "public": "client/dist",
   "builds": [
     {
       "src": "api/socket.js",
@@ -9,15 +10,7 @@
   ],
   "routes": [
     {
-      "src": "/api/socket\\.io(.*)",
-      "dest": "/api/socket.js"
-    },
-    {
       "src": "/api/(.*)",
-      "dest": "/api/socket.js"
-    },
-    {
-      "src": "(.*)",
       "dest": "/api/socket.js"
     }
   ]
