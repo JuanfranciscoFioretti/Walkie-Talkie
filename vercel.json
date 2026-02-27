@@ -3,6 +3,10 @@
   "buildCommand": "bash build.sh",
   "builds": [
     {
+      "src": "client/dist/**",
+      "use": "@vercel/static"
+    },
+    {
       "src": "api/socket.js",
       "use": "@vercel/node"
     }
