@@ -1,13 +1,11 @@
 {
   "version": 2,
   "buildCommand": "bash build.sh",
+  "public": "client/dist",
   "builds": [
     {
-      "src": "api/package.json",
-      "use": "@vercel/node",
-      "config": {
-        "zeroConfig": true
-      }
+      "src": "api/socket.js",
+      "use": "@vercel/node"
     }
   ],
   "routes": [
@@ -21,6 +19,7 @@
     },
     {
       "src": "/(.*)",
+      "methods": ["GET", "HEAD"],
       "dest": "/client/dist/$1"
     }
   ]
