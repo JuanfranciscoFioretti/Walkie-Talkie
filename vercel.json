@@ -3,14 +3,22 @@
   "buildCommand": "bash build.sh",
   "builds": [
     {
-      "src": "api/index.js",
+      "src": "api/socket.js",
       "use": "@vercel/node"
     }
   ],
   "routes": [
     {
-      "src": "/(.*)",
-      "dest": "/api/index.js"
+      "src": "/api/socket\\.io(.*)",
+      "dest": "/api/socket.js"
+    },
+    {
+      "src": "/api/(.*)",
+      "dest": "/api/socket.js"
+    },
+    {
+      "src": "(.*)",
+      "dest": "/api/socket.js"
     }
   ]
 }
