@@ -31,10 +31,18 @@ function getDistPath() {
 const DIST_PATH = getDistPath()
 
 export default function handler(req, res) {
+  console.log('[API] Request:', req.method, req.url)
+  
   // Initialize Socket.IO for /api/socket.io requests
-  if (req.url.startsWith('/api/socket.io')) {
+  if (req.url.includes('/api/socket.io') || req.url.startsWith('/api/socket.io')) {
+    console.log('[API] Routing to Socket.IO')
     initSocketIO(res)
-    res.socket.server.io.engine.handleRequest(req, res)
+    if (res.socket.server.io) {
+      res.socket.server.io.engine.handleRequest(req, res)
+    } else {
+      res.writeHead(500)
+      res.end('Socket.IO not initialized')
+    }
     return
   }
 
@@ -46,7 +54,10 @@ function initSocketIO(res) {
   if (ioInstance) return
 
   const server = res.socket.server
-  if (server.io) return
+  if (server.io) {
+    ioInstance = server.io
+    return
+  }
 
   console.log('[Socket.IO] Initializing')
 
@@ -55,10 +66,16 @@ function initSocketIO(res) {
     addTrailingSlash: false,
     transports: ['polling'],
     allowUpgrades: false,
-    cors: { origin: true, credentials: true, methods: ['GET', 'POST'] },
+    cors: { 
+      origin: true, 
+      credentials: true, 
+      methods: ['GET', 'POST'],
+      allowedHeaders: ['*']
+    },
     pingTimeout: 60000,
     pingInterval: 25000,
-    maxHttpBufferSize: 1e6
+    maxHttpBufferSize: 1e6,
+    serveClient: false
   })
 
   io.on('connection', (socket) => {

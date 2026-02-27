@@ -4,9 +4,6 @@ import en from './locales/en'
 import es from './locales/es'
 import da from './locales/da'
 
-const SERVER_URL = import.meta.env.VITE_SERVER_URL || 
-  (import.meta.env.PROD ? window.location.origin : 'http://localhost:3001')
-
 export default function App() {
   const [socket, setSocket] = useState(null)
   const [joined, setJoined] = useState(false)
@@ -99,54 +96,51 @@ export default function App() {
   const pendingCandidatesRef = useRef({})
 
   useEffect(() => {
-    console.log('Connecting to server:', SERVER_URL)
-    console.log('Environment:', {
-      PROD: import.meta.env.PROD,
+    const isProduction = import.meta.env.PROD
+    console.log('🚀 Socket Init:', { 
+      PROD: isProduction,
       VITE_SERVER_URL: import.meta.env.VITE_SERVER_URL,
       origin: typeof window !== 'undefined' ? window.location.origin : 'N/A'
     })
     
-    // Detect if we're on Vercel production (same origin as client)
-    const isVercelProduction = import.meta.env.PROD && 
-                               typeof window !== 'undefined' &&
-                               SERVER_URL === window.location.origin
-    
+    // In production (Vercel), connect to same origin with /api/socket.io path
+    // In development, connect to localhost:3001
     const socketConfig = {
-      path: isVercelProduction ? '/api/socket.io' : '/socket.io',
-      // Vercel serverless: ONLY polling, no WebSocket upgrade
-      transports: isVercelProduction ? ['polling'] : ['websocket', 'polling'],
+      path: isProduction ? '/api/socket.io' : '/socket.io',
+      transports: isProduction ? ['polling'] : ['websocket', 'polling'],
       reconnection: true,
       reconnectionDelay: 1000,
       reconnectionDelayMax: 5000,
       reconnectionAttempts: Infinity,
       timeout: 20000,
-      forceNew: false,
-      upgrade: !isVercelProduction
+      upgrade: !isProduction
     }
     
-    console.log('Socket config:', { 
-      isVercelProduction, 
+    // Server URL: in production use same origin, in development use localhost:3001
+    const url = isProduction ? undefined : 'http://localhost:3001'
+    
+    console.log('📡 Socket Config:', { 
+      url: url || 'same origin',
       path: socketConfig.path, 
-      transports: socketConfig.transports, 
-      url: SERVER_URL 
+      transports: socketConfig.transports
     })
     
-    const s = io(SERVER_URL, socketConfig)
+    const s = io(url, socketConfig)
     socketRef.current = s
     setSocket(s)
 
     s.on('connect', () => {
-      console.log('✓ Connected successfully to:', SERVER_URL, 'Socket ID:', s.id)
+      console.log('✅ Connected:', s.id)
       showNotice('Connected to server')
     })
     
     s.on('connect_error', (error) => {
-      console.error('✗ Connection failed:', error.message || error)
+      console.error('❌ Connection error:', error)
       showNotice('Connecting to server...')
     })
     
     s.on('disconnect', (reason) => {
-      console.log('✗ Disconnected:', reason)
+      console.log('❌ Disconnected:', reason)
       if (reason === 'io server disconnect') {
         showNotice('Server disconnected')
       } else if (reason !== 'io client namespace disconnect') {
