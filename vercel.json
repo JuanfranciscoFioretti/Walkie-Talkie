@@ -1,7 +1,6 @@
 {
   "version": 2,
   "buildCommand": "bash build.sh",
-  "public": "client/dist",
   "builds": [
     {
       "src": "api/socket.js",
@@ -12,6 +11,10 @@
     {
       "src": "/api/(.*)",
       "dest": "/api/socket.js"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/client/dist/$1"
     }
   ]
 }
