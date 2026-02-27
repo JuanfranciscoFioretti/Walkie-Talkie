@@ -31,17 +31,31 @@ function getDistPath() {
 const DIST_PATH = getDistPath()
 
 export default function handler(req, res) {
-  console.log('[API] Request:', req.method, req.url)
+  const url = req.url
+  const isSocketIO = url.includes('socket.io') || url.startsWith('/api/socket.io')
   
-  // Initialize Socket.IO for /api/socket.io requests
-  if (req.url.includes('/api/socket.io') || req.url.startsWith('/api/socket.io')) {
-    console.log('[API] Routing to Socket.IO')
+  console.log('[Handler]', req.method, url, '| Socket.IO?', isSocketIO)
+  
+  // Initialize Socket.IO for any socket.io-related request
+  if (isSocketIO) {
+    console.log('[Handler] Processing Socket.IO request')
     initSocketIO(res)
-    if (res.socket.server.io) {
-      res.socket.server.io.engine.handleRequest(req, res)
-    } else {
+    
+    if (!res.socket.server.io) {
+      console.error('[Handler] Socket.IO not initialized!')
       res.writeHead(500)
-      res.end('Socket.IO not initialized')
+      return res.end('Socket.IO initialization failed')
+    }
+    
+    try {
+      res.socket.server.io.engine.handleRequest(req, res)
+      console.log('[Handler] Socket.IO request handled')
+    } catch (err) {
+      console.error('[Handler] Socket.IO error:', err.message)
+      if (!res.headersSent) {
+        res.writeHead(500)
+        res.end('Socket.IO error: ' + err.message)
+      }
     }
     return
   }
@@ -51,15 +65,22 @@ export default function handler(req, res) {
 }
 
 function initSocketIO(res) {
-  if (ioInstance) return
-
   const server = res.socket.server
+  
+  // If Socket.IO is already attached to the server, reuse it
   if (server.io) {
+    console.log('[Socket.IO] Reusing existing instance')
     ioInstance = server.io
     return
   }
 
-  console.log('[Socket.IO] Initializing')
+  if (ioInstance) {
+    console.log('[Socket.IO] Attaching existing instance to server')
+    server.io = ioInstance
+    return
+  }
+
+  console.log('[Socket.IO] Creating new instance')
 
   const io = new Server(server, {
     path: '/api/socket.io',
@@ -69,22 +90,25 @@ function initSocketIO(res) {
     cors: { 
       origin: true, 
       credentials: true, 
-      methods: ['GET', 'POST'],
+      methods: ['GET', 'POST', 'OPTIONS'],
       allowedHeaders: ['*']
     },
     pingTimeout: 60000,
     pingInterval: 25000,
     maxHttpBufferSize: 1e6,
-    serveClient: false
+    serveClient: false,
+    connectTimeout: 45000
   })
 
+  console.log('[Socket.IO] Server configured, waiting for connections...')
+
   io.on('connection', (socket) => {
-    console.log('[Socket.IO] Connected:', socket.id)
+    console.log('[Socket.IO] ✅ Client connected:', socket.id)
 
     socket.on('join-room', ({ room, username }) => {
       socket.join(room)
       socket.data.username = username || 'Anonymous'
-      console.log(`[Socket.IO] ${socket.id} joined ${room}`)
+      console.log(`[Socket.IO] ✅ ${socket.id} joined ${room} as ${username}`)
       socket.to(room).emit('user-joined', { id: socket.id, username: socket.data.username })
       const users = Array.from(io.sockets.adapter.rooms.get(room) || []).map(id => ({
         id,
@@ -118,15 +142,22 @@ function initSocketIO(res) {
       io.to(data.target).emit('webrtc-ice-candidate', { candidate: data.candidate, from: socket.id })
     })
 
-    socket.on('disconnecting', () => {
+    socket.on('disconnect', (reason) => {
+      console.log('[Socket.IO] ❌ Disconnected:', socket.id, 'Reason:', reason)
       Array.from(socket.rooms)
         .filter(r => r !== socket.id)
         .forEach(room => socket.to(room).emit('user-left', { id: socket.id }))
+    })
+
+    socket.on('error', (err) => {
+      console.error('[Socket.IO] ⚠️  Socket error:', socket.id, err)
     })
   })
 
   server.io = io
   ioInstance = io
+  
+  console.log('[Socket.IO] ✅ Instance created and stored')
 }
 
 function serveStatic(req, res) {
